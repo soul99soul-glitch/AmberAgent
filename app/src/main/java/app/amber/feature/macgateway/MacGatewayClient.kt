@@ -12,8 +12,10 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.X509TrustManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
@@ -26,6 +28,28 @@ import okhttp3.RequestBody.Companion.toRequestBody
 
 internal val MacGatewayJson = Json { ignoreUnknownKeys = true }
 
+@Serializable
+enum class GatewayEndpointRole {
+    @SerialName("cloud") CLOUD,
+    @SerialName("mac") MAC;
+
+    companion object {
+        internal fun inferLegacy(name: String, addresses: List<String>): GatewayEndpointRole {
+            val label = name.trim().lowercase()
+            if (listOf("cloud", "amberd", "云端", "服务器", "server", "vps", "linux").any { it in label }) return CLOUD
+            if (listOf("macbook", "imac", "mac studio", "mac mini", "mac pro", "studio mac").any { it in label }) return MAC
+            return if ("mac" in label && addresses.isNotEmpty() && addresses.all(::isLocalAddress)) MAC else CLOUD
+        }
+
+        private fun isLocalAddress(address: String): Boolean {
+            val host = address.trim().lowercase()
+            return host in setOf("localhost", "127.0.0.1", "::1") || host.endsWith(".local") ||
+                listOf("192.168.", "10.", "100.").any(host::startsWith) ||
+                (host.startsWith("172.") && host.split('.').getOrNull(1)?.toIntOrNull()?.let { it in 16..31 } == true)
+        }
+    }
+}
+
 /** Contents of the `amber-gateway pair` QR code (`amber://gateway/pair?p=<base64url JSON>`). */
 @Serializable
 data class MacGatewayPairingPayload(
@@ -37,6 +61,7 @@ data class MacGatewayPairingPayload(
     /** base64 SHA-256 of the gateway certificate's SubjectPublicKeyInfo. */
     val fp: String,
     val s: String,
+    val role: GatewayEndpointRole? = null,
 ) {
     companion object {
         private const val MAX_LINK_LENGTH = 4096
@@ -67,6 +92,7 @@ data class MacGatewayConnection(
     val port: Int,
     val fingerprint: String,
     val deviceId: String,
+    val role: GatewayEndpointRole? = null,
 )
 
 /** `GET /v1/status`. Dates are seconds since 1970; absent optionals are omitted by the Mac. */
@@ -94,8 +120,8 @@ data class MacGatewayStatus(
         val diskFreeBytes: Long? = null,
         val batteryPercent: Int? = null,
         val onBattery: Boolean? = null,
-        val memoryPressure: String,
-        val thermal: String,
+        val memoryPressure: String? = null,
+        val thermal: String? = null,
     )
 
     @Serializable
@@ -178,6 +204,7 @@ sealed class MacGatewayException(message: String) : Exception(message) {
     class NotFound(val code: String) : MacGatewayException(code)
     class Conflict(val code: String) : MacGatewayException(code)
     open class Server(message: String) : MacGatewayException(message)
+    class MutationUnconfirmed : Server("gateway_request_unconfirmed")
     class Forbidden(
         val code: String,
         val requiresLocalApproval: Boolean = false,
@@ -203,6 +230,7 @@ class MacGatewayClient(
     private val fingerprint: String,
     private val token: String?,
     private val scheme: String = "https",
+    private val endpointRole: GatewayEndpointRole? = null,
 ) {
     private class PinMismatchException : CertificateException("SPKI pin mismatch")
 
@@ -228,6 +256,9 @@ class MacGatewayClient(
         // would retry the next address and send the push twice.
         .readTimeout(25, TimeUnit.SECONDS)
         .build()
+
+    private val fixedPeerHttp by lazy { http.newBuilder().followRedirects(false).build() }
+    private val singleAttemptHttp by lazy { fixedPeerHttp.newBuilder().retryOnConnectionFailure(false).build() }
 
     @Volatile
     private var preferredAddress: String? = null
@@ -294,6 +325,24 @@ class MacGatewayClient(
 
     suspend fun testPush() {
         send("POST", listOf("v1", "test-push"))
+    }
+
+    suspend fun macBoard(): List<MacBoardItem> =
+        decode<MacBoardResponse>(send("GET", listOf("v1", "amber", "board"))).board
+
+    suspend fun macSchedules(): List<MacGatewaySchedule> =
+        decode<MacSchedulesResponse>(send("GET", listOf("v1", "amber", "schedules"))).schedules
+
+    suspend fun createMacSchedule(draft: MacScheduleDraft) {
+        send("POST", listOf("v1", "amber", "schedules"), draft.requestBody(), singleAttempt = true)
+    }
+
+    suspend fun setMacScheduleEnabled(id: String, enabled: Boolean) {
+        send("POST", listOf("v1", "amber", "schedules", id, "enabled"), mapOf("enabled" to enabled), singleAttempt = true)
+    }
+
+    suspend fun runMacSchedule(id: String) {
+        send("POST", listOf("v1", "amber", "schedules", id, "run"), singleAttempt = true)
     }
 
     suspend fun unpair() {
@@ -606,6 +655,36 @@ class MacGatewayClient(
         )
     }
 
+    internal suspend fun requestCloudDetail(
+        method: String,
+        segments: List<String>,
+        body: Map<String, Any>?,
+    ): String {
+        if (endpointRole != GatewayEndpointRole.CLOUD || token.isNullOrBlank()) {
+            throw MacGatewayException.Forbidden("cloud_detail_requires_cloud_pairing")
+        }
+        val route = segments.take(2)
+        val id = segments.getOrNull(2)
+        val resourceId = id != null && id.isNotBlank() && id !in setOf(".", "..") && '/' !in id && '\\' !in id
+        val allowed = when (method) {
+            "GET" -> body == null && (
+                segments == listOf("v2", "configuration") || segments == listOf("v2", "rules") ||
+                    segments == listOf("v2", "agents", "main", "activity") || segments == listOf("v1", "amber", "board") ||
+                    (route == listOf("v2", "work-items") && resourceId && segments.size == 3)
+                )
+            "POST" -> when {
+                segments == listOf("v2", "work-items") -> body?.keys == setOf("requestId", "text", "title")
+                !resourceId || body != null || segments.size != 4 -> false
+                route == listOf("v2", "work-items") -> segments[3] == "cancel"
+                route == listOf("v2", "rules") -> CloudRuleAction.entries.any { it.path == segments[3] }
+                else -> false
+            }
+            else -> false
+        }
+        if (!allowed) throw MacGatewayException.Forbidden("cloud_detail_request_not_allowed")
+        return send(method, segments, body, singleAttempt = method == "POST", requireFixedPeer = true)
+    }
+
     private inline fun <reified T> decode(text: String): T =
         runCatching { MacGatewayJson.decodeFromString<T>(text) }.getOrElse { throw MacGatewayException.InvalidResponse() }
 
@@ -615,11 +694,14 @@ class MacGatewayClient(
         body: Map<String, Any>? = null,
         queryParameters: Map<String, String> = emptyMap(),
         headers: Map<String, String> = emptyMap(),
+        singleAttempt: Boolean = false,
+        requireFixedPeer: Boolean = false,
     ): String =
         withContext(Dispatchers.IO) {
             val requestBody = body?.let { map ->
                 JsonObject(map.mapValues { (_, value) ->
                     when (value) {
+                        is JsonElement -> value
                         is Boolean -> JsonPrimitive(value)
                         is Number -> JsonPrimitive(value)
                         else -> JsonPrimitive(value.toString())
@@ -628,7 +710,13 @@ class MacGatewayClient(
             }
             val ordered = preferredAddress?.let { preferred -> listOf(preferred) + addrs.filter { it != preferred } } ?: addrs
             var sawPinMismatch = false
-            for (address in ordered) {
+            // A lost response may follow a successful mutation. Do not replay it at another address.
+            val transport = when {
+                singleAttempt -> singleAttemptHttp
+                requireFixedPeer -> fixedPeerHttp
+                else -> http
+            }
+            for (address in if (singleAttempt) ordered.take(1) else ordered) {
                 val url = HttpUrl.Builder().scheme(scheme).host(address).port(port)
                     .apply {
                         segments.forEach { addPathSegment(it) }
@@ -650,7 +738,7 @@ class MacGatewayClient(
                     }
                     .build()
                 val (code, text) = try {
-                    http.newCall(request).execute().use { it.code to it.body.string() }
+                    transport.newCall(request).execute().use { it.code to it.body.string() }
                 } catch (error: IOException) {
                     if (generateSequence<Throwable>(error) { it.cause }.any { it is PinMismatchException }) sawPinMismatch = true
                     continue
@@ -677,6 +765,10 @@ class MacGatewayClient(
                     else -> throw MacGatewayException.Server(errorMessage ?: "HTTP $code")
                 }
             }
-            throw if (sawPinMismatch) MacGatewayException.CertificateMismatch() else MacGatewayException.Unreachable()
+            throw when {
+                sawPinMismatch -> MacGatewayException.CertificateMismatch()
+                singleAttempt -> MacGatewayException.MutationUnconfirmed()
+                else -> MacGatewayException.Unreachable()
+            }
         }
 }

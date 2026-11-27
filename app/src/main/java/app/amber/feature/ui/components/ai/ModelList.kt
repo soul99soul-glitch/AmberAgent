@@ -254,35 +254,37 @@ internal fun ColumnScope.ModelList(
     }
 
     val tokens = LocalAmberTokens.current
-    // Search is a compact control with the same soft pill treatment as the model trigger;
-    // the surrounding layout still reserves the 48dp touch target.
+    val amberType = LocalAmberType.current
+    // Quiet search capsule matching Amber's current sheet surface and hairline treatment.
     Surface(
-        shape = androidx.compose.foundation.shape.CircleShape,
-        color = tokens.surface2,
-        border = androidx.compose.foundation.BorderStroke(1.dp, tokens.line.copy(alpha = 0.46f)),
+        shape = CircleShape,
+        color = tokens.surface,
+        border = BorderStroke(0.5.dp, tokens.line),
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
-            .padding(bottom = 4.dp),
+            .padding(top = 12.dp, bottom = 8.dp),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(9.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier
-                .heightIn(min = 48.dp)
-                .padding(horizontal = 13.dp),
+                .heightIn(min = 42.dp)
+                .padding(start = 14.dp, end = if (searchKeywords.isNotEmpty()) 4.dp else 14.dp),
         ) {
             Icon(
                 imageVector = Lucide.Search,
                 contentDescription = null,
                 tint = tokens.ink3,
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(16.dp),
             )
             BasicTextField(
                 value = searchKeywords,
                 onValueChange = { searchKeywords = it },
                 singleLine = true,
-                textStyle = MaterialTheme.typography.bodyMedium.copy(color = tokens.ink),
+                textStyle = amberType.body.copy(fontSize = 14.sp, color = tokens.ink),
                 cursorBrush = SolidColor(tokens.accent),
                 decorationBox = { inner ->
                     Box(
@@ -292,7 +294,7 @@ internal fun ColumnScope.ModelList(
                         if (searchKeywords.isEmpty()) {
                             Text(
                                 text = stringResource(R.string.model_list_search_placeholder),
-                                style = MaterialTheme.typography.bodyMedium,
+                                style = amberType.body.copy(fontSize = 14.sp),
                                 color = tokens.ink3,
                             )
                         }
@@ -304,28 +306,28 @@ internal fun ColumnScope.ModelList(
                     .heightIn(min = 24.dp),
             )
             if (searchKeywords.isNotEmpty()) {
-                IconButton(
-                    onClick = { searchKeywords = "" },
-                    modifier = Modifier.size(48.dp),
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .clickable { searchKeywords = "" },
+                    contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         imageVector = Lucide.X,
                         contentDescription = stringResource(R.string.cancel),
                         tint = tokens.ink3,
-                        modifier = Modifier.size(18.dp),
+                        modifier = Modifier.size(15.dp),
                     )
                 }
             }
         }
     }
 
-    // Amber Redesign §2/§3: list rows are 0-radius full-bleed (no cards), groups
-    // separated by mono section labels + whitespace, rows by 1px hairlines.
-    // Old code used spacedBy(8dp) + Card per group → double-border violation.
     LazyColumn(
         state = lazyListState,
         verticalArrangement = Arrangement.spacedBy(0.dp),
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
         modifier = Modifier
             .weight(1f)
             .fillMaxWidth(),
@@ -334,9 +336,9 @@ internal fun ColumnScope.ModelList(
             item {
                 Text(
                     text = stringResource(R.string.model_list_no_providers),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.extendColors.gray6,
-                    modifier = Modifier.padding(8.dp)
+                    style = amberType.secondary.copy(fontSize = 13.5.sp),
+                    color = tokens.ink3,
+                    modifier = Modifier.padding(vertical = 12.dp, horizontal = 4.dp),
                 )
             }
         }
@@ -345,57 +347,42 @@ internal fun ColumnScope.ModelList(
             item(key = "search-empty") {
                 Text(
                     text = stringResource(R.string.model_list_no_matches),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.extendColors.gray6,
-                    modifier = Modifier.padding(vertical = 20.dp, horizontal = 8.dp),
+                    style = amberType.secondary.copy(fontSize = 13.5.sp),
+                    color = tokens.ink3,
+                    modifier = Modifier.padding(vertical = 20.dp, horizontal = 4.dp),
                 )
             }
         }
 
         if (favoriteModels.isNotEmpty()) {
             item(key = "favorite-header") {
-                // Amber Redesign §3: section label = mono uppercase + 0.15em
-                // tracking + ink-3, NOT primary blue. §4: accent budget — section
-                // headers are neutral, not terracotta.
                 val tokens = LocalAmberTokens.current
                 Text(
-                    text = stringResource(R.string.model_list_favorite).uppercase(),
-                    style = LocalAmberType.current.meta.copy(
-                        fontSize = 10.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.15.em,
+                    text = stringResource(R.string.model_list_favorite),
+                    style = LocalAmberType.current.secondary.copy(
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
                     ),
                     color = tokens.ink3,
-                    modifier = Modifier
-                        .padding(bottom = 6.dp, top = 12.dp)
+                    modifier = Modifier.padding(start = 4.dp, bottom = 6.dp, top = 4.dp),
                 )
             }
 
-            items(
+            itemsIndexed(
                 items = favoriteModels,
-                key = { "favorite:" + it.first.id.toString() }
-            ) { (model, provider) ->
-                // V3: 移除拖拽 handle（用户反馈实用性低）—— 不再包 ReorderableItem
-                ModelItem(
+                key = { _, entry -> "favorite:" + entry.first.id.toString() }
+            ) { index, (model, provider) ->
+                PickerModelRow(
                     model = model,
-                    onSelect = onSelect,
-                    modifier = Modifier.animateItem(),
                     providerSetting = provider,
-                    select = model.id == currentModel,
-                    onDismiss = { onDismiss() },
-                    tail = {
-                        IconButton(
-                            onClick = {
-                                onFavoriteModelsChange(favoriteModelIds.filter { it != model.id })
-                            }
-                        ) {
-                            Icon(
-                                HeartIcon,
-                                contentDescription = stringResource(R.string.favorite_remove),
-                                modifier = Modifier.size(20.dp),
-                                tint = app.amber.feature.ui.pages.chat.LocalChatTheme.current.accent,
-                            )
-                        }
+                    isActive = model.id == currentModel,
+                    onSelect = onSelect,
+                    onDismiss = onDismiss,
+                    isFirst = index == 0,
+                    isLast = index == favoriteModels.lastIndex,
+                    favorite = true,
+                    onToggleFavorite = {
+                        onFavoriteModelsChange(favoriteModelIds.filter { it != model.id })
                     },
                 )
             }
@@ -489,26 +476,23 @@ internal fun ColumnScope.ModelList(
                 }
             }
     }
-    if (providers.isNotEmpty()) {
+    if (providers.size > 1) {
         val tokens = LocalAmberTokens.current
-        // Amber Redesign §2: chips are small controls → 12dp radius (NOT 999 pill).
-        // §3: no top hairline separator (that would be a double border with the
-        // list's own grouping above). Chips use surface-2 fill, no stroke — the
-        // fill alone distinguishes them, no need for a border.
         Column(modifier = Modifier.fillMaxWidth()) {
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 10.dp, bottom = 14.dp),
+                    .padding(top = 8.dp, bottom = 14.dp),
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 state = providerBadgeListState,
             ) {
                 items(providers) { provider ->
                     Row(
                         modifier = Modifier
-                            .clip(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
-                            .background(tokens.surface2)
+                            .clip(CircleShape)
+                            .background(tokens.surface)
+                            .border(0.5.dp, tokens.line, CircleShape)
                             .clickable {
                                 val position = providerPositions[provider.id] ?: 0
                                 coroutineScope.launch {
@@ -519,12 +503,10 @@ internal fun ColumnScope.ModelList(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        // cn provider name (chips are labels, not mono IDs)
                         Text(
                             text = provider.name,
-                            fontSize = 12.5.sp,
+                            style = LocalAmberType.current.secondary.copy(fontSize = 12.5.sp),
                             color = tokens.ink2,
-                            letterSpacing = 0.2.sp,
                             maxLines = 1,
                         )
                     }

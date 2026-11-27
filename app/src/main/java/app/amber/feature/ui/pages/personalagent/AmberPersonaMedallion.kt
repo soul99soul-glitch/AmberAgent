@@ -16,10 +16,16 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.dropShadow
+import androidx.compose.ui.graphics.shadow.Shadow
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -31,8 +37,17 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.amber.feature.prompts.AgentPersonaAvatarStore
 import app.amber.feature.ui.theme.LocalAmberTokens
 import coil3.compose.AsyncImage
+import org.koin.compose.koinInject
+
+@Composable
+private fun savedPersonaAvatar(): ByteArray? {
+    val store: AgentPersonaAvatarStore = koinInject()
+    return store.avatar.collectAsStateWithLifecycle().value
+}
 
 /**
  * Warm editorial circular persona medallion aligned with iOS `AmberAgentPersonaMedallionView`
@@ -45,12 +60,13 @@ import coil3.compose.AsyncImage
 fun AmberPersonaMedallion(
     diameter: Dp = 64.dp,
     generating: Boolean = false,
-    customAvatarUri: String? = null,
+    avatar: ByteArray? = savedPersonaAvatar(),
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalAmberTokens.current
     val accent = tokens.accent
     val ringColor = if (tokens.isDark) tokens.floatingOutline else Color.White.copy(alpha = 0.9f)
+    var loaded by remember(avatar) { mutableStateOf(false) }
 
     val infiniteTransition = rememberInfiniteTransition(label = "personaMedallion")
     val haloPulse by infiniteTransition.animateFloat(
@@ -92,16 +108,25 @@ fun AmberPersonaMedallion(
             )
         }
 
-        val medallionShadow = if (tokens.isDark) 0.dp else 6.dp
         Box(
             modifier = Modifier
                 .size(diameter)
-                .shadow(
-                    elevation = medallionShadow,
-                    shape = CircleShape,
-                    clip = false,
-                    ambientColor = Color.Black.copy(alpha = 0.14f),
-                    spotColor = Color.Black.copy(alpha = 0.12f),
+                .then(
+                    if (tokens.isDark) {
+                        Modifier
+                    } else {
+                        // Soft ambient + contact shadow instead of a platform elevation, which
+                        // leaves a grey crescent under the medallion on paper themes.
+                        Modifier
+                            .dropShadow(
+                                CircleShape,
+                                Shadow(9.dp, Color.Black.copy(alpha = 0.045f), offset = DpOffset(0.dp, 3.dp)),
+                            )
+                            .dropShadow(
+                                CircleShape,
+                                Shadow(1.5.dp, Color.Black.copy(alpha = 0.04f), offset = DpOffset(0.dp, 0.75.dp)),
+                            )
+                    },
                 )
                 .clip(CircleShape)
                 .background(
@@ -124,17 +149,7 @@ fun AmberPersonaMedallion(
                 ),
             contentAlignment = Alignment.Center,
         ) {
-            val avatar = customAvatarUri?.trim()?.takeIf { it.isNotEmpty() }
-            if (avatar != null) {
-                AsyncImage(
-                    model = avatar,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(CircleShape),
-                )
-            } else {
+            if (!loaded) {
                 AmberFoxCanvas(
                     accent = accent,
                     cream = if (tokens.isDark) Color(0xFFF5F0E8) else Color(0xFFFBF9F5),
@@ -143,6 +158,16 @@ fun AmberPersonaMedallion(
                     headTiltDegrees = idleTilt,
                     headBobFraction = if (generating) (haloPulse - 0.5f) * 0.028f else (haloPulse - 0.5f) * 0.01f,
                     modifier = Modifier.fillMaxSize().padding(diameter * 0.035f),
+                )
+            }
+            if (avatar != null) {
+                AsyncImage(
+                    model = avatar,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    onSuccess = { loaded = true },
+                    onError = { loaded = false },
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
         }

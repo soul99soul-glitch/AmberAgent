@@ -19,6 +19,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
@@ -37,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.agent.R
+import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.Model
 import app.amber.core.context.CompactLifecycleState
 import app.amber.core.context.ConversationCompact
@@ -64,6 +66,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import kotlin.uuid.Uuid
@@ -169,7 +172,16 @@ internal fun ChatPageComposerHost(
     onOpenConversation: (Uuid) -> Unit,
     onOpenWebMountSession: (sessionId: String, reopen: Boolean) -> Unit,
     onStop: () -> Unit,
-    onUpdateChatModel: (Model) -> Unit,
+    currentChatModel: Model?,
+    onOpenModelPicker: (() -> Unit)?,
+    modelPickerOpen: Boolean,
+    modelPickerTransitioning: Boolean = false,
+    keyboardDismissRequested: Boolean = false,
+    modeOverlayOpen: Boolean = false,
+    inputFocused: Boolean = false,
+    onInputFocusChanged: (Boolean) -> Unit = {},
+    composerFocusRequester: androidx.compose.ui.focus.FocusRequester? = null,
+    onSelectReasoningLevel: (Uuid, ReasoningLevel) -> Unit = { _, _ -> },
     onUpdateSettings: (Settings) -> Unit,
     onCompactContext: () -> Unit,
 ) {
@@ -208,18 +220,18 @@ internal fun ChatPageComposerHost(
     val imeVisible = WindowInsets.isImeVisible
     val inputHasContent = inputState.textContent.text.isNotEmpty() ||
         inputState.messageContent.isNotEmpty() || inputState.attachmentImports.isNotEmpty()
-    val defaultBoardSuggestion = stringResource(R.string.amber_redesign_suggestion_board)
     val defaultReplySuggestion = stringResource(R.string.amber_redesign_suggestion_reply)
     val defaultConceptSuggestion = stringResource(R.string.amber_redesign_suggestion_concept)
     val visibleConfigurationIssue = configurationIssue?.takeIf {
-        !loading && (inputState.isEditing() || !inputActions.canSendWithoutChatModel(inputState.getContents()))
+        !loading && (inputState.isEditing() || !inputActions.canSendWithoutChatModel())
     }
     val duetSuggestions = if (isPersonalAgentStage && visibleConfigurationIssue == null &&
-        !loading && !suggestionsPaused && !imeVisible && !inputHasContent && !inputState.isEditing()
+        !loading && !suggestionsPaused && !inputFocused && !imeVisible && !modelPickerOpen &&
+        !inputHasContent && !inputState.isEditing()
     ) {
         if (conversation.messageNodes.isEmpty()) {
             startSuggestions.ifEmpty {
-                listOf(defaultBoardSuggestion, defaultReplySuggestion, defaultConceptSuggestion)
+                listOf(defaultReplySuggestion, defaultConceptSuggestion)
             }
         } else {
             // The input snapshot omits chatSuggestions and same-ID streaming edits.
@@ -272,7 +284,9 @@ internal fun ChatPageComposerHost(
                 onLongClickSuggestion = { onSendSuggestion(it) },
             )
         }
-        if (visibleConfigurationIssue != null) {
+        if (visibleConfigurationIssue != null &&
+            (visibleConfigurationIssue != ChatConfigurationIssue.MissingModel || onOpenModelPicker == null)
+        ) {
             ChatConfigurationHint(
                 issue = visibleConfigurationIssue,
                 compactPill = isPersonalAgentStage,
@@ -282,9 +296,9 @@ internal fun ChatPageComposerHost(
         ChatInput(
             submissionOwner = inputSubmissionOwner,
             duetStyle = isPersonalAgentStage,
-            belowComposerContent = { composerImeVisible ->
+            belowComposerContent = {
                 if (stage is ChatStageMode.PersonalAgent) {
-                    stage.bottomChrome(composerImeVisible)
+                    stage.bottomChrome()
                 }
             },
             aboveComposerContent = {
@@ -342,7 +356,16 @@ internal fun ChatPageComposerHost(
             onSendClick = inputActions::send,
             onLongSendClick = inputActions::longSend,
             onCompactContext = onCompactContext,
-            onUpdateChatModel = onUpdateChatModel,
+            currentChatModel = currentChatModel,
+            onOpenModelPicker = onOpenModelPicker,
+            modelPickerOpen = modelPickerOpen,
+            modelPickerTransitioning = modelPickerTransitioning,
+            keyboardDismissRequested = keyboardDismissRequested,
+            modeOverlayOpen = modeOverlayOpen,
+            inputFocused = inputFocused,
+            onInputFocusChanged = onInputFocusChanged,
+            focusRequester = composerFocusRequester,
+            onSelectReasoningLevel = onSelectReasoningLevel,
             onUpdateSettings = onUpdateSettings,
             onUpdateSearchService = { index ->
                 onUpdateSettings(
@@ -365,91 +388,118 @@ private fun ChatComposerCloudStatusDockHost(
     val context = LocalContext.current
     val toaster = LocalToaster.current
     val conversationIdString = conversationId.toString()
-    val cloudStateSliceFlow = remember(conversationIdString, macGatewayRepository, localAsyncTaskCoordinator) {
+    val selectedRole by macGatewayRepository.selectedDialogueRole.collectAsStateWithLifecycle()
+    val personalAgentStage = LocalChatStageMode.current as? ChatStageMode.PersonalAgent
+    val dialogueRole = if (personalAgentStage != null) personalAgentStage.dialogueRole else selectedRole
+    val remoteGateway = dialogueRole?.let(macGatewayRepository::slot)
+    val gateway = remoteGateway ?: macGatewayRepository
+    val currentGeneration by gateway.connectionGeneration.collectAsStateWithLifecycle()
+    val generation = personalAgentStage?.dialogueGeneration ?: currentGeneration
+    val cloudStateSliceFlow = remember(conversationIdString, gateway, dialogueRole, localAsyncTaskCoordinator) {
         observeChatComposerCloudStateSlice(
             conversationId = conversationIdString,
-            cloudActiveFlow = macGatewayRepository.state.map { it.isCloudDialogueActive },
-            cloudDialogueStateFlow = macGatewayRepository.cloudDialogueState,
+            cloudActiveFlow = flowOf(remoteGateway != null),
+            cloudDialogueStateFlow = gateway.cloudDialogueState,
             localAsyncStateFlow = localAsyncTaskCoordinator.uiState,
         )
     }
-    val initialCloudStateSlice = remember(conversationIdString, macGatewayRepository, localAsyncTaskCoordinator) {
+    val initialCloudStateSlice = remember(conversationIdString, gateway, dialogueRole, generation, localAsyncTaskCoordinator) {
         projectChatComposerCloudState(
             conversationId = conversationIdString,
-            cloudActive = macGatewayRepository.state.value.isCloudDialogueActive,
-            cloudDialogueState = macGatewayRepository.cloudDialogueState.value,
+            cloudActive = remoteGateway != null,
+            cloudDialogueState = gateway.cloudDialogueState.value,
             localAsyncState = localAsyncTaskCoordinator.uiState.value,
         )
     }
-    val cloudStateSlice by cloudStateSliceFlow.collectAsStateWithLifecycle(
-        initialValue = initialCloudStateSlice,
-    )
-    val isCloudActive = cloudStateSlice.cloudActive
-    val dockUiState = remember(cloudStateSlice) { cloudStateSlice.toDockUiState() }
-
-    CloudDialogueStatusDock(
-        conversationId = conversationIdString,
-        cloudActive = isCloudActive,
-        uiState = dockUiState,
-        onSelectFollowupTarget = { workItemId ->
-            if (isCloudActive) {
-                macGatewayRepository.selectFollowupTarget(workItemId)
-            } else {
-                localAsyncTaskCoordinator.selectFollowupTarget(conversationId, workItemId)
-            }
-        },
-        onStopTask = { workItemId ->
-            scope.launch {
-                runCatching {
-                    if (isCloudActive) {
-                        macGatewayRepository.stopCloudWorkItem(workItemId)
-                    } else {
-                        localAsyncTaskCoordinator.stopTask(conversationId, workItemId)
-                    }
-                }.onFailure { error ->
-                    toaster.show(error.message ?: "Stop failed", type = ToastType.Error)
+    key(dialogueRole, generation) {
+        val cloudStateSlice by cloudStateSliceFlow.collectAsStateWithLifecycle(
+            initialValue = initialCloudStateSlice,
+        )
+        val isCloudActive = cloudStateSlice.cloudActive
+        // Personal Agent aligns with iOS & HarmonyOS: live task progress renders as a quiet
+        // single-line inline status inside the timeline rather than a bulky card above the
+        // composer. Only surface the dock here if an unverified cloud side-effect requires
+        // explicit user recovery (outcomeUnknown).
+        if (personalAgentStage == null || cloudStateSlice.outcomeUnknownTasks.isNotEmpty()) {
+            val dockUiState = remember(cloudStateSlice, personalAgentStage != null) {
+                if (personalAgentStage != null) {
+                    cloudStateSlice.copy(
+                        activeTasks = emptyList(),
+                        recentInputs = emptyList(),
+                        selectedFollowupWorkItemId = null,
+                    ).toDockUiState()
+                } else {
+                    cloudStateSlice.toDockUiState()
                 }
             }
-        },
-        onRecheckOutcomeUnknown = { workItemId ->
-            if (isCloudActive) {
-                scope.launch {
-                    runCatching { macGatewayRepository.recheckCloudOutcomeUnknown(workItemId) }
-                        .onSuccess { settled ->
-                            if (!settled) {
-                                toaster.show(
-                                    context.getString(R.string.mac_gateway_cloud_outcome_unknown_hint),
+
+            CloudDialogueStatusDock(
+                conversationId = conversationIdString,
+                cloudActive = isCloudActive,
+                endpointRole = dialogueRole,
+                uiState = dockUiState,
+                onSelectFollowupTarget = { workItemId ->
+                    if (isCloudActive) {
+                        gateway.selectFollowupTarget(workItemId, generation)
+                    } else {
+                        localAsyncTaskCoordinator.selectFollowupTarget(conversationId, workItemId)
+                    }
+                },
+                onStopTask = { workItemId ->
+                    scope.launch {
+                        runCatching {
+                            if (isCloudActive) {
+                                gateway.stopCloudWorkItem(workItemId, expectedConnectionGeneration = generation)
+                            } else {
+                                localAsyncTaskCoordinator.stopTask(conversationId, workItemId)
+                            }
+                        }.onFailure { error ->
+                            toaster.show(error.message ?: "Stop failed", type = ToastType.Error)
+                        }
+                    }
+                },
+                onRecheckOutcomeUnknown = { workItemId ->
+                    if (isCloudActive) {
+                        scope.launch {
+                            runCatching { gateway.recheckCloudOutcomeUnknown(workItemId, generation) }
+                                .onSuccess { settled ->
+                                    if (!settled) {
+                                        toaster.show(
+                                            context.getString(R.string.mac_gateway_cloud_outcome_unknown_hint),
+                                        )
+                                    }
+                                }
+                                .onFailure { error ->
+                                    toaster.show(error.message ?: "Recheck failed", type = ToastType.Error)
+                                }
+                        }
+                    }
+                },
+                onRetryOutcomeUnknown = { workItemId ->
+                    if (isCloudActive) {
+                        scope.launch {
+                            runCatching {
+                                gateway.retryCloudOutcomeUnknown(
+                                    conversationId = conversationIdString,
+                                    workItemId = workItemId,
+                                    expectedConnectionGeneration = generation,
                                 )
+                            }.onFailure { error ->
+                                toaster.show(error.message ?: "Retry failed", type = ToastType.Error)
                             }
                         }
-                        .onFailure { error ->
-                            toaster.show(error.message ?: "Recheck failed", type = ToastType.Error)
-                        }
-                }
-            }
-        },
-        onRetryOutcomeUnknown = { workItemId ->
-            if (isCloudActive) {
-                scope.launch {
-                    runCatching {
-                        macGatewayRepository.retryCloudOutcomeUnknown(
-                            conversationId = conversationIdString,
-                            workItemId = workItemId,
-                        )
-                    }.onFailure { error ->
-                        toaster.show(error.message ?: "Retry failed", type = ToastType.Error)
                     }
-                }
-            }
-        },
-        onAbandonOutcomeUnknown = { workItemId ->
-            if (isCloudActive) {
-                scope.launch {
-                    macGatewayRepository.abandonCloudOutcomeUnknown(workItemId)
-                }
-            }
-        },
-    )
+                },
+                onAbandonOutcomeUnknown = { workItemId ->
+                    if (isCloudActive) {
+                        scope.launch {
+                            gateway.abandonCloudOutcomeUnknown(workItemId, generation)
+                        }
+                    }
+                },
+            )
+        }
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)

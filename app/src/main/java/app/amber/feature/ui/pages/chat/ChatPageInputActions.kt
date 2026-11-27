@@ -3,7 +3,6 @@ package app.amber.feature.ui.pages.chat
 import app.amber.agent.R
 import app.amber.ai.ui.UIMessagePart
 import app.amber.ai.ui.isEmptyInputMessage
-import app.amber.core.ai.tools.parseDeepReadSlashCommand
 import app.amber.core.service.PendingUserMessageMode
 import app.amber.feature.ui.components.ai.ChatInputSubmissionOwner
 import app.amber.feature.ui.hooks.ChatInputAttachmentImportStatus
@@ -38,8 +37,7 @@ internal class ChatPageInputActions(
     private val sendMessage: (parts: List<UIMessagePart>, answer: Boolean, queueMode: PendingUserMessageMode, messageId: Uuid) -> Deferred<Boolean>?,
     private val editMessage: (parts: List<UIMessagePart>, messageId: Uuid, regenerate: Boolean) -> Boolean,
 ) {
-    fun canSendWithoutChatModel(parts: List<UIMessagePart>): Boolean =
-        cloudDialogueMode || parseDeepReadSlashCommand(parts) != null
+    fun canSendWithoutChatModel(): Boolean = cloudDialogueMode
 
     fun confirmEdit(regenerate: Boolean) {
         val unresolved = input.attachmentImports.firstOrNull {
@@ -67,7 +65,7 @@ internal class ChatPageInputActions(
         parts: List<UIMessagePart>,
         editingMessage: Uuid?,
     ): Boolean {
-        if (!checkConfiguration(parts, editingMessage)) return false
+        if (!checkConfiguration(editingMessage)) return false
         if (editingMessage != null) {
             return editMessage(parts, editingMessage, true)
         }
@@ -78,11 +76,10 @@ internal class ChatPageInputActions(
             followupTargetActive = isFollowupTargetActive(),
         )
         val messageId = Uuid.random()
-        val stageEligible = armStage && (cloudDialogueMode || parseDeepReadSlashCommand(parts) == null)
-        if (stageEligible) sendStage?.beginLocalAdmission(messageId)
+        if (armStage) sendStage?.beginLocalAdmission(messageId)
         try {
             val accepted = sendMessage(parts, true, queueMode, messageId)?.await() == true
-            if (accepted && stageEligible && (sendStage == null || sendStage.admittingMessageId == messageId)) {
+            if (accepted && armStage && (sendStage == null || sendStage.admittingMessageId == messageId)) {
                 sendStage?.onSubmitAccepted(
                     SendStageIntent(
                         host = if (cloudDialogueMode) "cloud" else "local",
@@ -104,7 +101,7 @@ internal class ChatPageInputActions(
         parts: List<UIMessagePart>,
         editingMessage: Uuid?,
     ): Boolean {
-        if (!checkConfiguration(parts, editingMessage)) return false
+        if (!checkConfiguration(editingMessage)) return false
         return if (editingMessage != null) {
             editMessage(parts, editingMessage, true)
         } else {
@@ -116,7 +113,7 @@ internal class ChatPageInputActions(
         val text = suggestion.trim()
         if (text.isEmpty()) return false
         val parts = listOf(UIMessagePart.Text(text))
-        if (!checkConfiguration(parts, null)) return false
+        if (!checkConfiguration(null)) return false
         return sendMessage(parts, true, PendingUserMessageMode.FOLLOWUP, Uuid.random()) != null
     }
 
@@ -124,14 +121,14 @@ internal class ChatPageInputActions(
         val text = instruction.trim()
         if (text.isEmpty()) return false
         val parts = listOf(UIMessagePart.Text(text))
-        if (!checkConfiguration(parts, null)) return false
+        if (!checkConfiguration(null)) return false
         return submission.sendWidgetAction(parts) { actionParts ->
             sendMessage(actionParts, true, PendingUserMessageMode.FOLLOWUP, Uuid.random()) != null
         }
     }
 
-    private fun checkConfiguration(parts: List<UIMessagePart>, editingMessage: Uuid?): Boolean {
-        val canRouteWithoutChatModel = editingMessage == null && canSendWithoutChatModel(parts)
+    private fun checkConfiguration(editingMessage: Uuid?): Boolean {
+        val canRouteWithoutChatModel = editingMessage == null && canSendWithoutChatModel()
         if (configurationIssue != null && !canRouteWithoutChatModel) {
             showError(configurationIssue.messageRes)
             return false

@@ -6,41 +6,33 @@ import java.time.Instant
  * P8-08 — 首页「继续」聚合的候选模型。
  *
  * 一个候选代表一个「用户可继续」的任务项目，全部来自各域的持久投影
- * （Council Room 持久 JSON、DeepRead 缓存、MiniApp 草稿表、图像生成运行账本），
+ * （Council Room 持久 JSON、MiniApp 草稿表、图像生成运行账本），
  * 不依赖当前进程内运行状态。候选被点击后通过 [ContinueRoute] 精确路由到任务焦点。
  */
 enum class ContinueSourceKind {
     COUNCIL,
-    DEEP_READ,
     MINIAPP_DRAFT,
     MINIAPP_RUNNER,
     IMAGE_GENERATION,
-    NOVEL_WORKSPACE,
 }
 
 enum class ContinueStatus {
     /** 草稿：已落盘、等待用户确认后继续（如 MiniApp 写的输入框草稿）。 */
     DRAFT,
 
-    /** 暂停：用户或系统暂停，可恢复（如 Novel 批次）。 */
+    /** 暂停：用户或系统暂停，可恢复。 */
     PAUSED,
 
-    /** 等待用户：需要用户操作才能推进（如待启动的 Novel 批次）。 */
+    /** 等待用户：需要用户操作才能推进。 */
     WAITING_USER,
 
-    /** 中断但可恢复：上次运行被打断/失败，仍可继续（如 Council 中断房间、未完成的深度阅读）。 */
+    /** 中断但可恢复：上次运行被打断/失败，仍可继续（如 Council 中断房间）。 */
     FAILED_RESUMABLE,
 }
 
 /** 点击候选后跳转的目标；各域各自精确聚焦到任务所在页面。 */
 sealed interface ContinueRoute {
     data class CouncilRoom(val conversationId: String) : ContinueRoute
-
-    data class DeepRead(
-        val topicId: String,
-        val title: String,
-        val sourceUrl: String? = null,
-    ) : ContinueRoute
 
     data class Chat(
         val conversationId: String,
@@ -56,11 +48,6 @@ sealed interface ContinueRoute {
 
     data class MiniAppRunner(val appId: String) : ContinueRoute
 
-    data class NovelWorkspace(
-        val projectId: String,
-        val branchSlug: String? = null,
-        val jobId: String? = null,
-    ) : ContinueRoute
 }
 
 data class ContinueCandidate(

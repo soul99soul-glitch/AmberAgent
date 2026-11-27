@@ -23,11 +23,6 @@ import app.amber.feature.chat.impl.ChatSessionResolverImpl
 import app.amber.feature.chat.impl.ChatTurnAgent
 import app.amber.feature.chat.impl.ProjectingEventWriter
 import app.amber.feature.chat.impl.ProjectingRunScope
-import app.amber.feature.deepread.api.DeepReadEventPayload
-import app.amber.feature.deepread.api.DeepReadInput
-import app.amber.feature.deepread.api.DeepReadArtifact
-import app.amber.feature.deepread.api.DeepReadDescriptor
-import app.amber.feature.deepread.impl.DeepReadAgentAdapter
 import app.amber.feature.history.SessionAccessGrantStore
 import app.amber.core.repository.CouncilRoomRepository
 import app.amber.feature.live.LiveEventPayload
@@ -41,11 +36,6 @@ import app.amber.feature.modelcouncil.ExternalCliModelCouncilRunner
 import app.amber.feature.modelcouncil.ModelCouncilManager
 import app.amber.feature.modelcouncil.ProviderModelCouncilTextRunner
 import app.amber.core.settings.prefs.SettingsAggregator
-import app.amber.feature.novel.workspace.NovelTurnAgent
-import app.amber.feature.novel.workspace.NovelTurnArtifact
-import app.amber.feature.novel.workspace.NovelTurnDescriptor
-import app.amber.feature.novel.workspace.NovelTurnEventPayload
-import app.amber.feature.novel.workspace.NovelTurnInput
 import app.amber.feature.runtime.ColdStartRuntimeRecoveryGate
 import app.amber.feature.runtime.RunRecoveryService
 import app.amber.feature.subagent.GenerationSubAgentRunner
@@ -77,13 +67,6 @@ val agentRuntimeModule = module {
                 factory = { ChatTurnAgent(get(), get(), get<app.amber.core.service.ConversationAccess>()) },
             )
             register(
-                descriptor = DeepReadDescriptor.value,
-                inputClass = DeepReadInput::class,
-                inputSerializer = DeepReadInput.serializer(),
-                artifactSerializer = DeepReadArtifact.serializer(),
-                factory = { DeepReadAgentAdapter(get(), get()) },
-            )
-            register(
                 descriptor = SubAgentTurnDescriptor.value,
                 inputClass = SubAgentTurnInput::class,
                 inputSerializer = SubAgentTurnInput.serializer(),
@@ -102,13 +85,6 @@ val agentRuntimeModule = module {
                         },
                     )
                 },
-            )
-            register(
-                descriptor = NovelTurnDescriptor.value,
-                inputClass = NovelTurnInput::class,
-                inputSerializer = NovelTurnInput.serializer(),
-                artifactSerializer = NovelTurnArtifact.serializer(),
-                factory = { NovelTurnAgent(get()) },
             )
             register(
                 descriptor = LiveTurnDescriptor.value,
@@ -134,30 +110,7 @@ val agentRuntimeModule = module {
                 AgentEventPayloadCodec(ToolLifecycleEvent.TYPE_STARTED, ToolLifecycleEvent.Started.serializer()),
             ToolLifecycleEvent.Finished::class.qualifiedName!! to
                 AgentEventPayloadCodec(ToolLifecycleEvent.TYPE_FINISHED, ToolLifecycleEvent.Finished.serializer()),
-            DeepReadEventPayload.SectionStarted::class.qualifiedName!! to
-                AgentEventPayloadCodec("SectionStarted", DeepReadEventPayload.SectionStarted.serializer()),
-            DeepReadEventPayload.SectionCompleted::class.qualifiedName!! to
-                AgentEventPayloadCodec("SectionCompleted", DeepReadEventPayload.SectionCompleted.serializer()),
-            DeepReadEventPayload.VerificationCompleted::class.qualifiedName!! to
-                AgentEventPayloadCodec("VerificationCompleted", DeepReadEventPayload.VerificationCompleted.serializer()),
-            DeepReadEventPayload.GenerationPhaseChanged::class.qualifiedName!! to
-                AgentEventPayloadCodec("GenerationPhaseChanged", DeepReadEventPayload.GenerationPhaseChanged.serializer()),
-            NovelTurnEventPayload.ToolActivity::class.qualifiedName!! to
-                AgentEventPayloadCodec(NovelTurnEventPayload.TYPE_TOOL_ACTIVITY, NovelTurnEventPayload.ToolActivity.serializer()),
-            NovelTurnEventPayload.TurnCompleted::class.qualifiedName!! to
-                AgentEventPayloadCodec(NovelTurnEventPayload.TYPE_TURN_COMPLETED, NovelTurnEventPayload.TurnCompleted.serializer()),
-            NovelTurnEventPayload.TurnFailed::class.qualifiedName!! to
-                AgentEventPayloadCodec(NovelTurnEventPayload.TYPE_TURN_FAILED, NovelTurnEventPayload.TurnFailed.serializer()),
-            // Step 5: request snapshots persist through the generic Final path
-            // — this codec map backs every run kind's PersistingEventWriter
-            // (DeepRead / SubAgent / Novel scopes, and chat's persisting
-            // fallback); chat's ProjectingEventWriter handles the payload
-            // directly. Coverage truth: EMISSION is gated by the kernel's
-            // durable path (runId + onTerminal + ledger + flags), not by this
-            // registration. Today that means chat turns and thread-graph
-            // SubAgent turns emit snapshots; DeepRead / Novel thread their run
-            // scope's writer + runId but do not arm onTerminal yet, so their
-            // rounds stay snapshot-free until their durable path is on.
+            // Chat and thread-graph SubAgent turns can persist request snapshots.
             ChatEventPayload.RequestSnapshot::class.qualifiedName!! to
                 AgentEventPayloadCodec(ChatEventPayload.RequestSnapshot.TYPE, ChatEventPayload.RequestSnapshot.serializer()),
             LiveEventPayload.AnalysisCompleted::class.qualifiedName!! to
@@ -220,10 +173,6 @@ val agentRuntimeModule = module {
                             events = writer,
                         )
                     }
-                    is DeepReadInput -> LegacyRunScope(
-                        runId = runId,
-                        events = persistingWriter(DeepReadDescriptor.ID.value),
-                    )
                     is SubAgentTurnInput -> LegacyRunScope(
                         runId = runId,
                         parentRunId = input.parentRunId?.let(::AgentRunId),
@@ -231,10 +180,6 @@ val agentRuntimeModule = module {
                             SubAgentTurnDescriptor.ID.value,
                             parentRunId = input.parentRunId?.let(::AgentRunId),
                         ),
-                    )
-                    is NovelTurnInput -> LegacyRunScope(
-                        runId = runId,
-                        events = persistingWriter(NovelTurnDescriptor.ID.value),
                     )
                     is LiveTurnInput -> LegacyRunScope(
                         runId = runId,

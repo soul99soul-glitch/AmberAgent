@@ -333,6 +333,16 @@ internal fun ChatListNormal(
                         )
                     }
                     if ((BuildConfig.DEBUG || BuildConfig.CHAT_PERF_TRACE)) Trace.beginSection("Amber chatlist lazy column")
+                    // Defer reading Scaffold's innerPadding to layout phase so 120Hz IME frames
+                    // never recompose the whole ChatListNormal tree on every animation tick.
+                    val verticalInnerPadding = remember(innerPadding) {
+                        object : PaddingValues {
+                            override fun calculateLeftPadding(layoutDirection: androidx.compose.ui.unit.LayoutDirection) = 0.dp
+                            override fun calculateTopPadding() = innerPadding.calculateTopPadding()
+                            override fun calculateRightPadding(layoutDirection: androidx.compose.ui.unit.LayoutDirection) = 0.dp
+                            override fun calculateBottomPadding() = innerPadding.calculateBottomPadding()
+                        }
+                    }
                     LazyColumn(
                         state = state,
                         // 底部锚定列表：index 0 是视觉底部（最新内容），流式增长从锚定的
@@ -356,10 +366,7 @@ internal fun ChatListNormal(
                                     Modifier
                                 },
                             )
-                            .padding(
-                                top = innerPadding.calculateTopPadding(),
-                                bottom = innerPadding.calculateBottomPadding(),
-                            )
+                            .padding(verticalInnerPadding)
                             .chatSendStageLayout(
                                 listState = state,
                                 sendStage = sendStage,

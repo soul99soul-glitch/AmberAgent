@@ -346,15 +346,15 @@ class AgentToolDispatcherLedgerTest : DurableRuntimeTestBase() {
         val readOnly = Tool(name = "file_read", description = "", execute = { emptyList() }).effectClass()
         assertEquals(app.amber.feature.tools.ToolEffectClass.READ_ONLY, readOnly)
 
-        val zcodeRead = Tool(name = "wm_zcode_read", description = "", execute = { emptyList() })
-        assertEquals(ToolEffectClass.READ_ONLY, zcodeRead.effectClass())
+        val webMountObserve = Tool(name = "wm_observe", description = "", execute = { emptyList() })
+        assertEquals(ToolEffectClass.READ_ONLY, webMountObserve.effectClass())
         assertEquals(
             "webmount:session-1",
-            zcodeRead.invocationPolicy("""{"session_id":"session-1"}""").parallelGroup,
+            webMountObserve.invocationPolicy("""{"session_id":"session-1"}""").parallelGroup,
         )
         assertEquals(
             180_000,
-            ToolRegistry.from(listOf(zcodeRead)).metadataFor("wm_zcode_read")?.outputBudgetChars,
+            ToolRegistry.from(listOf(webMountObserve)).metadataFor("wm_observe")?.outputBudgetChars,
         )
 
         val idempotent = Tool(name = "file_write", description = "", execute = { emptyList() })
@@ -363,23 +363,6 @@ class AgentToolDispatcherLedgerTest : DurableRuntimeTestBase() {
 
         val unknown = Tool(name = "post_message", description = "", execute = { emptyList() }).effectClass()
         assertEquals(app.amber.feature.tools.ToolEffectClass.NON_IDEMPOTENT_WRITE, unknown)
-
-        val zcodeAsk = Tool(
-            name = "wm_zcode_ask",
-            description = "",
-            needsApproval = true,
-            allowsAutoApproval = false,
-            mandatoryApproval = true,
-            execute = { emptyList() },
-        )
-        assertEquals(ToolEffectClass.NON_IDEMPOTENT_WRITE, zcodeAsk.effectClass())
-        val askPolicy = zcodeAsk.invocationPolicy("""{"session_id":"session-1"}""")
-        assertTrue(askPolicy.mutates)
-        assertEquals(ToolRisk.High, askPolicy.risk)
-        assertTrue(askPolicy.needsApproval)
-        assertFalse(askPolicy.autoApprovable)
-        assertFalse(askPolicy.concurrencySafe)
-        assertEquals("webmount:session-1", askPolicy.parallelGroup)
 
         // EffectId is the idempotency key for idempotent writes.
         val result = dispatcher.execute(

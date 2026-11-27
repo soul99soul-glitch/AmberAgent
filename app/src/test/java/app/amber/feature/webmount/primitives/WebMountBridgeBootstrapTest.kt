@@ -16,9 +16,7 @@ class WebMountBridgeBootstrapTest {
         val sourceNames = listOf(
             "bridge-network.js",
             "bridge-feishu.js",
-            "bridge-zcode.js",
             "bridge.js",
-            "zcode-ui-tree.js",
         )
         assertEquals(
             sourceNames,

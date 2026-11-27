@@ -33,6 +33,7 @@ import app.amber.feature.macgateway.CloudDialogueUiState
 import app.amber.feature.macgateway.CloudInputDisposition
 import app.amber.feature.macgateway.CloudSubmissionKind
 import app.amber.feature.macgateway.CloudTaskSession
+import app.amber.feature.macgateway.GatewayEndpointRole
 import app.amber.feature.ui.components.ui.workspaceColors
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.ShieldAlert
@@ -58,6 +59,7 @@ internal fun CloudDialogueStatusDock(
     onRetryOutcomeUnknown: (String) -> Unit = {},
     onAbandonOutcomeUnknown: (String) -> Unit = {},
     modifier: Modifier = Modifier,
+    endpointRole: GatewayEndpointRole? = null,
 ) {
     val activeTasks = uiState.activeTasksForConversation(conversationId)
     val unknownTasks = uiState.outcomeUnknownTasksForConversation(conversationId)
@@ -95,8 +97,10 @@ internal fun CloudDialogueStatusDock(
                 Text(
                     text = when {
                         targetTask != null -> stringResource(R.string.mac_gateway_cloud_mode_targeting, targetTask.title)
-                        cloudActive -> stringResource(R.string.mac_gateway_cloud_mode_active) + " · " +
-                            stringResource(R.string.mac_gateway_cloud_mode_new_message)
+                        cloudActive -> stringResource(
+                            if (endpointRole == GatewayEndpointRole.MAC) R.string.amber_multi_device_mac_dialogue
+                            else R.string.mac_gateway_cloud_mode_active,
+                        ) + " · " + stringResource(R.string.mac_gateway_cloud_mode_new_message)
                         else -> stringResource(R.string.mac_gateway_cloud_mode_new_message)
                     },
                     style = MaterialTheme.typography.labelMedium,
@@ -128,6 +132,7 @@ internal fun CloudDialogueStatusDock(
             activeTasks.forEach { task ->
                 CloudActiveTaskRow(
                     task = task,
+                    endpointRole = endpointRole,
                     selectedForFollowup = targetTask?.workItemId == task.workItemId,
                     onToggleFollowup = {
                         val next = if (targetTask?.workItemId == task.workItemId) null else task.workItemId
@@ -156,13 +161,17 @@ internal fun CloudDialogueStatusDock(
 @Composable
 private fun CloudActiveTaskRow(
     task: CloudTaskSession,
+    endpointRole: GatewayEndpointRole?,
     selectedForFollowup: Boolean,
     onToggleFollowup: () -> Unit,
     onStop: () -> Unit,
 ) {
     val workspace = workspaceColors()
     val progressLine = task.progressText?.takeIf { it.isNotBlank() }
-        ?: stringResource(R.string.mac_gateway_cloud_task_running)
+        ?: stringResource(
+            if (endpointRole == GatewayEndpointRole.MAC) R.string.amber_multi_device_mac_running
+            else R.string.mac_gateway_cloud_task_running,
+        )
 
     Row(
         modifier = Modifier.fillMaxWidth(),

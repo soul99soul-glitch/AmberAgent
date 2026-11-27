@@ -857,7 +857,6 @@ class AgentLiveStatusNotifier(
             "recipe_import",
             "recipe_rollback",
             "recipe_delete",
-            "wm_zcode_ask",
             "wm_run_goal",
             "wm_fetch_replay",
             "wm_site_add",

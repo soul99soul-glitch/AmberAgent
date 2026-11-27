@@ -279,20 +279,9 @@ class ExecutionPolicyGateTest {
             "webview_open",
             "webview_open_link",
             "screen_open_url",
-            "wm_zcode_read",
-            "wm_zcode_ask",
         )) {
             assertGated(tool, """{"url":"https://blocked.io/page"}""", policy)
         }
-        // wm_zcode_open can be used as a discovery call without touching the
-        // browser when the optional origin is absent. If present, its
-        // model-supplied origin is still checked by the same domain gate.
-        assertAllowed("wm_zcode_open", "{}", policy)
-        assertGated("wm_zcode_open", """{"url":"https://blocked.io/page"}""", policy)
-        assertGated("wm_zcode_read", """{"session_id":"s"}""", policy)
-        assertGated("wm_zcode_ask", """{"session_id":"s"}""", policy)
-        assertAllowed("wm_zcode_read", """{"url":"https://example.com/page","session_id":"s"}""", policy)
-        assertAllowed("wm_zcode_ask", """{"url":"https://example.com/page","session_id":"s"}""", policy)
     }
 
     @Test
@@ -311,11 +300,6 @@ class ExecutionPolicyGateTest {
         // officepro_open: app deep links skip the dimension; http(s) is gated.
         assertAllowed("officepro_open", """{"url":"feishu://doc/1"}""", policy)
         assertGated("officepro_open", """{"url":"https://evil.io/"}""", policy)
-
-        // deep_read_open: absent source_url skips; a present source_url is gated.
-        assertAllowed("deep_read_open", """{"topic_title":"t"}""", policy)
-        assertGated("deep_read_open", """{"source_url":"https://evil.io/x"}""", policy)
-        assertAllowed("deep_read_open", """{"source_url":"https://example.com/x"}""", policy)
     }
 
     @Test

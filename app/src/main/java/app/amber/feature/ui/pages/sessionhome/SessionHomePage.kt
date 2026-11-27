@@ -336,9 +336,7 @@ fun SessionHomePage() {
                         HomeFeatureRail(
                             resumeCandidate = continueCandidates.maxByOrNull { it.lastUpdatedAt },
                             onOpenResume = openContinueCandidate,
-                            onDeepRead = { navController.navigate(Screen.TodayBoard) },
                             onMiniApps = { navController.navigate(Screen.MiniAppList) },
-                            onNovel = { navController.navigate(Screen.NovelProjects) },
                             onWebMount = { navController.navigate(Screen.SettingExperimentalWebMount) },
                             onCouncil = openCouncilRoom,
                         )

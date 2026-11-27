@@ -53,9 +53,9 @@ class SessionHomeContinueStreamTest {
     }
 
     private fun candidate() = ContinueCandidate(
-        sourceKind = ContinueSourceKind.DEEP_READ,
+        sourceKind = ContinueSourceKind.MINIAPP_RUNNER,
         sourceId = "topic-1",
-        route = ContinueRoute.DeepRead("topic-1", "Topic"),
+        route = ContinueRoute.MiniAppRunner("topic-1"),
         title = "Topic",
         summary = "partial",
         lastUpdatedAt = Instant.EPOCH,

@@ -24,8 +24,6 @@ import androidx.test.espresso.Espresso.closeSoftKeyboard
 import androidx.test.espresso.Espresso.pressBack
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import app.amber.agent.data.db.dao.HotListDAO
-import app.amber.agent.data.db.entity.DeepReadCacheEntity
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ModelType
 import app.amber.ai.provider.OpenAIAuthMode
@@ -33,12 +31,6 @@ import app.amber.ai.provider.OpenAIBrand
 import app.amber.ai.provider.ProviderSetting
 import app.amber.core.files.SkillManager
 import app.amber.core.settings.prefs.SettingsAggregator
-import app.amber.feature.board.hotlist.deepread.DeepReadGenerationPhase
-import app.amber.feature.board.hotlist.deepread.DeepReadGenerationStage
-import app.amber.feature.board.hotlist.deepread.DeepReadOutput
-import app.amber.feature.board.hotlist.deepread.DeepReadSectionState
-import app.amber.feature.board.hotlist.deepread.DeepReadSectionStatus
-import app.amber.feature.novelworkspace.NovelWorkspaceProjectRepository
 import java.io.File
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -72,18 +64,12 @@ class RedesignNavigationSmokeTest {
     private val originalLaunchMode = preferences.getString(LAUNCH_START_MODE_PREF, null)
     private val originalColorMode = preferences.getString(COLOR_MODE_PREF, null)
 
-    private val deepReadFixtureTopicId = "redesign-smoke-topic-${System.currentTimeMillis()}"
-    private val deepReadFixtureTitle = "Redesign smoke deep read ${System.currentTimeMillis()}"
-    private val novelFixtureTitle = "Redesign smoke novel ${System.currentTimeMillis()}"
     private val skillFixtureSeed = "redesign-smoke-skill-${System.currentTimeMillis()}"
     private val providerFixtureName = "Redesign local provider ${System.currentTimeMillis()}"
     private val providerFixtureModelId = "redesign-cached-model"
 
-    private var insertedDeepRead = false
-    private var fixtureProjectId: String? = null
     private var fixtureSkillName: String? = null
     private var fixtureProviderId: Uuid? = null
-    private var originalDeepReadFirstUseConfirmed: Boolean? = null
 
     @get:Rule
     val compose = createEmptyComposeRule()
@@ -145,38 +131,6 @@ class RedesignNavigationSmokeTest {
     }
 
     private fun prepareLocalFixtures() {
-        val now = System.currentTimeMillis()
-        val hotListDao: HotListDAO = getKoin().get()
-        val output = DeepReadOutput(
-            generationPhase = DeepReadGenerationPhase.IDLE,
-            summary = "A cached local result used only to exercise the reader layout.",
-            sectionStates = mapOf(
-                DeepReadGenerationStage.OVERVIEW to
-                    DeepReadSectionState(DeepReadSectionStatus.READY),
-            ),
-        )
-        runBlocking {
-            hotListDao.upsertDeepRead(
-                DeepReadCacheEntity(
-                    topicId = deepReadFixtureTopicId,
-                    title = deepReadFixtureTitle,
-                    outputJson = app.amber.core.utils.JsonInstant.encodeToString(
-                        DeepReadOutput.serializer(),
-                        output,
-                    ),
-                    createdAt = now,
-                    expiresAt = now + 86_400_000L,
-                    updatedAt = now,
-                    sourceUrl = "https://example.com/redesign-smoke",
-                ),
-            )
-        }
-        insertedDeepRead = true
-
-        val workspaceRepository: NovelWorkspaceProjectRepository = getKoin().get()
-        val project = workspaceRepository.createBlank(novelFixtureTitle)
-        fixtureProjectId = project.projectDirectory.name.uppercase()
-
         val skillManager: SkillManager = getKoin().get()
         val skill = skillManager.saveSkill(
             name = skillFixtureSeed,
@@ -219,56 +173,12 @@ class RedesignNavigationSmokeTest {
         val settingsStore: SettingsAggregator = getKoin().get()
         runBlocking {
             settingsStore.update { current ->
-                originalDeepReadFirstUseConfirmed = current.agentRuntime.todayBoard.deepReadFirstUseConfirmed
-                current.copy(
-                    providers = current.providers + provider,
-                    // History opens the production reader through its first-use
-                    // gate before it reads this locally seeded cache. The test
-                    // supplies that prerequisite and restores it in cleanup;
-                    // it never confirms or starts a real generation.
-                    agentRuntime = current.agentRuntime.copy(
-                        todayBoard = current.agentRuntime.todayBoard.copy(
-                            deepReadFirstUseConfirmed = true,
-                        )
-                    ),
-                )
+                current.copy(providers = current.providers + provider)
             }
         }
     }
 
     private fun runNavigationCanary() {
-        // Board group: board -> history -> reader and board settings.
-        clickContent(R.string.session_home_feature_deep_read)
-        capturePage("board", R.string.deep_read_title)
-
-        clickContent(R.string.deep_read_history_title)
-        capturePage("deepread-history", R.string.deep_read_history_title)
-        clickClickableText(deepReadFixtureTitle)
-        capture("deepread-reader-state")
-        assertDynamicVisible(deepReadFixtureTitle)
-        capture("deepread-reader")
-        // Reader returns to its history list first; return once more before
-        // using the Board top-bar settings action.
-        goBack()
-        goBack()
-
-        clickContent(R.string.settings)
-        capturePage("board-settings", R.string.board_settings_title)
-        goBack()
-        goBack()
-
-        // Novel group: the project card is a real list row; opening it reaches
-        // the Markdown workspace without starting any writing operation.
-        clickContent(R.string.session_home_feature_novel)
-        waitForText(novelFixtureTitle)
-        capturePage("novel-projects", R.string.novel_projects_title)
-        clickClickableText(novelFixtureTitle)
-        waitForText(novelFixtureTitle)
-        assertDynamicVisible(novelFixtureTitle)
-        capture("novel-workspace")
-        goBack()
-        goBack()
-
         // Mini-app group is intentionally empty/read-only: no generation or
         // app source fixture is needed to inspect the list surface.
         clickContent(R.string.session_home_feature_mini_apps)
@@ -601,37 +511,9 @@ class RedesignNavigationSmokeTest {
             }
         }
         runCatching {
-            originalDeepReadFirstUseConfirmed?.let { originalConfirmed ->
-                val settingsStore: SettingsAggregator = getKoin().get()
-                runBlocking {
-                    settingsStore.update { current ->
-                        current.copy(
-                            agentRuntime = current.agentRuntime.copy(
-                                todayBoard = current.agentRuntime.todayBoard.copy(
-                                    deepReadFirstUseConfirmed = originalConfirmed,
-                                )
-                            ),
-                        )
-                    }
-                }
-            }
-        }
-        runCatching {
-            fixtureProjectId?.let { projectId ->
-                val workspaceRepository: NovelWorkspaceProjectRepository = getKoin().get()
-                workspaceRepository.delete(projectId)
-            }
-        }
-        runCatching {
             fixtureSkillName?.let { name ->
                 val skillManager: SkillManager = getKoin().get()
                 runBlocking { skillManager.deleteSkill(name) }
-            }
-        }
-        if (insertedDeepRead) {
-            runCatching {
-                val hotListDao: HotListDAO = getKoin().get()
-                runBlocking { hotListDao.deleteDeepRead(deepReadFixtureTopicId) }
             }
         }
     }

@@ -1,6 +1,7 @@
 package app.amber.feature.ui.theme
 
 import android.app.Activity
+import android.os.Build
 import android.graphics.Color as AndroidColor
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -22,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalFontFamilyResolver
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -32,10 +34,8 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import kotlinx.serialization.Serializable
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import app.amber.agent.StandaloneSurfaces
 import app.amber.core.settings.themeContrast
 import app.amber.core.settings.themeRgb
-import app.amber.feature.ui.pages.board.DeepReadAccentChoice
 import app.amber.feature.ui.hooks.rememberAmoledDarkMode
 import app.amber.feature.ui.hooks.rememberColorMode
 import app.amber.feature.ui.hooks.rememberUserSettingsState
@@ -47,6 +47,7 @@ private val ExtendDarkColors = darkExtendColors()
 val LocalExtendColors = compositionLocalOf { ExtendLightColors }
 
 val LocalDarkMode = compositionLocalOf { false }
+internal val LocalDarkThemePalette = compositionLocalOf { false }
 val LocalAmoledDarkMode = compositionLocalOf { false }
 
 private val AMOLED_DARK_BACKGROUND = Color(0xFF000000)
@@ -58,21 +59,21 @@ internal val AmberShapes = Shapes(
     extraLarge = RoundedCornerShape(22.dp),
 )
 internal val AmberTypography = Typography.copy(
-    displayLarge = Typography.displayLarge.copy(fontFamily = HankenGrotesk, fontSize = 28.sp, lineHeight = 36.sp, fontWeight = FontWeight.SemiBold),
-    displayMedium = Typography.displayMedium.copy(fontFamily = HankenGrotesk, fontSize = 25.sp, lineHeight = 32.sp, fontWeight = FontWeight.SemiBold),
-    displaySmall = Typography.displaySmall.copy(fontFamily = HankenGrotesk, fontSize = 22.sp, lineHeight = 29.sp, fontWeight = FontWeight.SemiBold),
-    headlineLarge = Typography.headlineLarge.copy(fontFamily = HankenGrotesk, fontSize = 20.sp, lineHeight = 27.sp, fontWeight = FontWeight.SemiBold),
-    headlineMedium = Typography.headlineMedium.copy(fontFamily = HankenGrotesk, fontSize = 18.sp, lineHeight = 25.sp, fontWeight = FontWeight.SemiBold),
-    headlineSmall = Typography.headlineSmall.copy(fontFamily = HankenGrotesk, fontSize = 17.sp, lineHeight = 23.sp, fontWeight = FontWeight.SemiBold),
-    titleLarge = Typography.titleLarge.copy(fontFamily = HankenGrotesk, fontSize = 17.sp, lineHeight = 23.sp, fontWeight = FontWeight.Bold),
-    titleMedium = Typography.titleMedium.copy(fontFamily = HankenGrotesk, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium),
-    titleSmall = Typography.titleSmall.copy(fontFamily = HankenGrotesk, fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
-    bodyLarge = Typography.bodyLarge.copy(fontFamily = HankenGrotesk, fontSize = 15.sp, lineHeight = 22.sp),
-    bodyMedium = Typography.bodyMedium.copy(fontFamily = HankenGrotesk, fontSize = 14.sp, lineHeight = 21.sp),
-    bodySmall = Typography.bodySmall.copy(fontFamily = HankenGrotesk, fontSize = 12.sp, lineHeight = 18.sp),
-    labelLarge = Typography.labelLarge.copy(fontFamily = HankenGrotesk, fontSize = 12.sp, lineHeight = 17.sp, fontWeight = FontWeight.Medium),
-    labelMedium = Typography.labelMedium.copy(fontFamily = HankenGrotesk, fontSize = 11.sp, lineHeight = 15.sp, fontWeight = FontWeight.Medium),
-    labelSmall = Typography.labelSmall.copy(fontFamily = HankenGrotesk, fontSize = 10.sp, lineHeight = 14.sp, fontWeight = FontWeight.Medium),
+    displayLarge = Typography.displayLarge.copy(fontFamily = AmberSans, fontSize = 28.sp, lineHeight = 36.sp, fontWeight = FontWeight.SemiBold),
+    displayMedium = Typography.displayMedium.copy(fontFamily = AmberSans, fontSize = 25.sp, lineHeight = 32.sp, fontWeight = FontWeight.SemiBold),
+    displaySmall = Typography.displaySmall.copy(fontFamily = AmberSans, fontSize = 22.sp, lineHeight = 29.sp, fontWeight = FontWeight.SemiBold),
+    headlineLarge = Typography.headlineLarge.copy(fontFamily = AmberSans, fontSize = 20.sp, lineHeight = 27.sp, fontWeight = FontWeight.SemiBold),
+    headlineMedium = Typography.headlineMedium.copy(fontFamily = AmberSans, fontSize = 18.sp, lineHeight = 25.sp, fontWeight = FontWeight.SemiBold),
+    headlineSmall = Typography.headlineSmall.copy(fontFamily = AmberSans, fontSize = 17.sp, lineHeight = 23.sp, fontWeight = FontWeight.SemiBold),
+    titleLarge = Typography.titleLarge.copy(fontFamily = AmberSans, fontSize = 17.sp, lineHeight = 23.sp, fontWeight = FontWeight.Bold),
+    titleMedium = Typography.titleMedium.copy(fontFamily = AmberSans, fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium),
+    titleSmall = Typography.titleSmall.copy(fontFamily = AmberSans, fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
+    bodyLarge = Typography.bodyLarge.copy(fontFamily = AmberSans, fontSize = 15.sp, lineHeight = 22.sp),
+    bodyMedium = Typography.bodyMedium.copy(fontFamily = AmberSans, fontSize = 14.sp, lineHeight = 21.sp),
+    bodySmall = Typography.bodySmall.copy(fontFamily = AmberSans, fontSize = 12.sp, lineHeight = 18.sp),
+    labelLarge = Typography.labelLarge.copy(fontFamily = AmberSans, fontSize = 12.sp, lineHeight = 17.sp, fontWeight = FontWeight.Medium),
+    labelMedium = Typography.labelMedium.copy(fontFamily = AmberSans, fontSize = 11.sp, lineHeight = 15.sp, fontWeight = FontWeight.Medium),
+    labelSmall = Typography.labelSmall.copy(fontFamily = AmberSans, fontSize = 10.sp, lineHeight = 14.sp, fontWeight = FontWeight.Medium),
 )
 
 private val NotionLightScheme = lightColorScheme(
@@ -180,13 +181,13 @@ fun AmberAgentTheme(
                 ?: themePackPaperTokens(pack.paper, darkTheme)?.bg
         }
     }
-    val systemBarsHaveDarkBackground = explicitSystemBarBackground?.let { color ->
+    val visualDark = explicitSystemBarBackground?.let { color ->
         val rgb = color.toArgb() and 0xFFFFFF
         themeContrast(rgb, 0xFFFFFF) > themeContrast(rgb, 0x000000)
     } ?: darkTheme
 
-    val colorScheme = if (darkTheme) NotionDarkScheme else NotionLightScheme
-    val colorSchemeConverted = remember(darkTheme, effectiveAmoledDarkMode, colorScheme) {
+    val colorScheme = if (visualDark) NotionDarkScheme else NotionLightScheme
+    val colorSchemeConverted = remember(effectiveAmoledDarkMode, colorScheme) {
         if (effectiveAmoledDarkMode) {
             colorScheme.copy(
                 background = AMOLED_DARK_BACKGROUND,
@@ -207,7 +208,7 @@ fun AmberAgentTheme(
             colorScheme
         }
     }
-    val extendColors = if (darkTheme) ExtendDarkColors else ExtendLightColors
+    val extendColors = if (visualDark) ExtendDarkColors else ExtendLightColors
 
     // Status / nav bar icon contrast follows the *app* theme (not system night mode).
     val view = LocalView.current
@@ -221,7 +222,7 @@ fun AmberAgentTheme(
                 // SystemBarStyle.auto() keys off system night mode and re-fires on
                 // insets/config updates — on ColorOS that races and restores white
                 // icons on a light app canvas. light()/dark() pin icon polarity.
-                val barStyle = if (systemBarsHaveDarkBackground) {
+                val barStyle = if (visualDark) {
                     SystemBarStyle.dark(AndroidColor.TRANSPARENT)
                 } else {
                     SystemBarStyle.light(AndroidColor.TRANSPARENT, AndroidColor.TRANSPARENT)
@@ -232,8 +233,8 @@ fun AmberAgentTheme(
                 )
                 WindowCompat.getInsetsController(window, window.decorView).apply {
                     // true → dark icons (for light backgrounds)
-                    isAppearanceLightStatusBars = !systemBarsHaveDarkBackground
-                    isAppearanceLightNavigationBars = !systemBarsHaveDarkBackground
+                    isAppearanceLightStatusBars = !visualDark
+                    isAppearanceLightNavigationBars = !visualDark
                     systemBarsBehavior =
                         WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                 }
@@ -254,17 +255,9 @@ fun AmberAgentTheme(
         themePack?.let { themePackPaperTokens(it.paper, darkTheme) } ?: baseTokens(amberBase)
     }
     val amberAccent = themePack?.accentHex?.let(::parseThemeColor)
-        // Standalone DeepRead carries its own product accent (iOS
-        // DeepReadAppearance parity) — apply it here so tokens, chatTheme and
-        // the M3 colorScheme all derive from it, including inside dialogs and
-        // bottom sheets that compose content in a separate window.
-        ?: if (StandaloneSurfaces.current == StandaloneSurfaces.DEEP_READ) {
-            DeepReadAccentChoice.colorFor(settings.agentRuntime.todayBoard.deepReadAccent, darkTheme)
-        } else {
-            parseAccent(displaySetting.accentColor)
-        }
-    val amberTokens = remember(themeBaseTokens, amberAccent, effectiveAmoledDarkMode, darkTheme, themeDesign, themePack?.inkHex) {
-        val tokens = buildAmberTokens(themeBaseTokens, amberAccent, themeDesign)
+        ?: parseAccent(displaySetting.accentColor)
+    val amberTokens = remember(themeBaseTokens, amberAccent, effectiveAmoledDarkMode, visualDark, themeDesign, themePack?.inkHex) {
+        val tokens = buildAmberTokens(themeBaseTokens, amberAccent, themeDesign).copy(isDark = visualDark)
         val documentInk = themePack?.inkHex?.let(::parseThemeColor)
         val withDocumentInk = if (documentInk != null) {
             // Portable themes use the same accent-filled user bubble as iOS.
@@ -279,8 +272,13 @@ fun AmberAgentTheme(
         ) else withDocumentInk
     }
     val chatTheme = remember(amberTokens) { amberTokens.toChatTheme() }
+    val hasCustomPalette = (if (darkTheme) themeDesign?.dark else themeDesign?.light) != null
+    val controlAccent = remember(amberTokens, hasCustomPalette) {
+        if (hasCustomPalette) amberTokens.readableControlAccent() else amberTokens.accent
+    }
+    val onControlAccent = if (controlAccent == chatTheme.accent) chatTheme.onAccent else accentInkFor(controlAccent)
 
-    val themedColorScheme = remember(colorSchemeConverted, chatTheme, effectiveAmoledDarkMode, darkTheme) {
+    val themedColorScheme = remember(colorSchemeConverted, chatTheme, effectiveAmoledDarkMode, controlAccent, onControlAccent) {
         run {
             // AmoledDark 时保留纯黑 bg/surface（省电），其他主题 token 仍跟 chatTheme
             val useAmoledBlack = effectiveAmoledDarkMode
@@ -302,32 +300,31 @@ fun AmberAgentTheme(
                 surfaceBright = chatTheme.containerHighest,
                 surfaceDim = chatTheme.containerLowest,
                 surfaceTint = chatTheme.accent,
-                primary = chatTheme.accent,
-                // The token carries the readable foreground for the active accent.
-                onPrimary = chatTheme.onAccent,
+                primary = controlAccent,
+                onPrimary = onControlAccent,
                 primaryContainer = chatTheme.accentSoft.compositeOver(chatTheme.paper),
-                onPrimaryContainer = chatTheme.accentDeep,
+                onPrimaryContainer = controlAccent,
                 primaryFixed = chatTheme.accentSoft.compositeOver(chatTheme.paper),
                 primaryFixedDim = chatTheme.accentSoft.compositeOver(chatTheme.paper),
-                onPrimaryFixed = chatTheme.accentDeep,
-                onPrimaryFixedVariant = chatTheme.accentDeep,
-                secondary = chatTheme.accent,
-                onSecondary = chatTheme.onAccent,
+                onPrimaryFixed = controlAccent,
+                onPrimaryFixedVariant = controlAccent,
+                secondary = controlAccent,
+                onSecondary = onControlAccent,
                 secondaryContainer = chatTheme.accentSoft.compositeOver(chatTheme.paper),
-                onSecondaryContainer = chatTheme.accentDeep,
+                onSecondaryContainer = controlAccent,
                 secondaryFixed = chatTheme.accentSoft.compositeOver(chatTheme.paper),
                 secondaryFixedDim = chatTheme.accentSoft.compositeOver(chatTheme.paper),
-                onSecondaryFixed = chatTheme.accentDeep,
-                onSecondaryFixedVariant = chatTheme.accentDeep,
+                onSecondaryFixed = controlAccent,
+                onSecondaryFixedVariant = controlAccent,
                 // Keep tertiary surfaces in the same accent family; dark themes use the softer fill.
-                tertiary = chatTheme.accentDeep,
-                onTertiary = chatTheme.onAccent,
+                tertiary = controlAccent,
+                onTertiary = onControlAccent,
                 tertiaryContainer = if (chatTheme.isDark) chatTheme.accentSoft else chatTheme.accentTint,
-                onTertiaryContainer = if (chatTheme.isDark) chatTheme.accent else chatTheme.accentDeep,
+                onTertiaryContainer = controlAccent,
                 tertiaryFixed = if (chatTheme.isDark) chatTheme.accentSoft else chatTheme.accentTint,
                 tertiaryFixedDim = if (chatTheme.isDark) chatTheme.accentSoft else chatTheme.accentTint,
-                onTertiaryFixed = if (chatTheme.isDark) chatTheme.accent else chatTheme.accentDeep,
-                onTertiaryFixedVariant = if (chatTheme.isDark) chatTheme.accent else chatTheme.accentDeep,
+                onTertiaryFixed = controlAccent,
+                onTertiaryFixedVariant = controlAccent,
                 // Snackbar inverse colors use the active ink/paper pair in both base modes.
                 inverseSurface = chatTheme.ink,
                 inverseOnSurface = chatTheme.paper,
@@ -342,8 +339,17 @@ fun AmberAgentTheme(
         }
     }
 
+    val textWeight = settings.displaySetting.textWeight
+    val fontResolver = rememberTextWeightResolver(textWeight)
+    val legacyWeightOffset = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) textWeight.offset else 0
+    val amberType = remember(legacyWeightOffset) { themeAmberTextStyles(null, legacyWeightOffset) }
+    val typography = remember(legacyWeightOffset) { themeTypography(null, legacyWeightOffset) }
+
     CompositionLocalProvider(
-        LocalDarkMode provides darkTheme,
+        LocalFontFamilyResolver provides fontResolver,
+        LocalLegacyTextWeightOffset provides legacyWeightOffset,
+        LocalDarkMode provides visualDark,
+        LocalDarkThemePalette provides darkTheme,
         LocalAmoledDarkMode provides effectiveAmoledDarkMode,
         LocalExtendColors provides extendColors,
         LocalOverscrollFactory provides null,
@@ -351,7 +357,7 @@ fun AmberAgentTheme(
         LocalThemePack provides themePack,
         LocalThemeDesign provides themeDesign,
         LocalThemeCanvasStyle provides themePack?.canvasStyle,
-        LocalAmberType provides defaultAmberTextStyles(),
+        LocalAmberType provides amberType,
         app.amber.feature.ui.pages.chat.LocalChatTheme provides chatTheme,
         // Bug fix: M3 LocalContentColor 默认 Color.Black. 没有 Surface 显式 provide 时
         // (如 ChatPage 直接放 MarkdownBlock 的无 bubble 渲染路径), 深色模式下文字仍渲染成黑色.
@@ -360,7 +366,7 @@ fun AmberAgentTheme(
     ) {
         MaterialTheme(
             colorScheme = themedColorScheme,
-            typography = AmberTypography,
+            typography = typography,
             shapes = themeShapes(themeDesign),
             content = content,
         )
@@ -390,23 +396,24 @@ internal fun chromeFontFamily(typeface: String?): FontFamily? = when (typeface) 
     else -> null
 }
 
-internal fun themeTypography(typeface: String?): androidx.compose.material3.Typography {
-    val family = chromeFontFamily(typeface) ?: return AmberTypography
+internal fun themeTypography(typeface: String?, weightOffset: Int = 0): androidx.compose.material3.Typography {
+    val family = chromeFontFamily(typeface)
+    if (family == null && weightOffset == 0) return AmberTypography
     return AmberTypography.copy(
-        displayLarge = AmberTypography.displayLarge.copy(fontFamily = family),
-        displayMedium = AmberTypography.displayMedium.copy(fontFamily = family),
-        displaySmall = AmberTypography.displaySmall.copy(fontFamily = family),
-        headlineLarge = AmberTypography.headlineLarge.copy(fontFamily = family),
-        headlineMedium = AmberTypography.headlineMedium.copy(fontFamily = family),
-        headlineSmall = AmberTypography.headlineSmall.copy(fontFamily = family),
-        titleLarge = AmberTypography.titleLarge.copy(fontFamily = family),
-        titleMedium = AmberTypography.titleMedium.copy(fontFamily = family),
-        titleSmall = AmberTypography.titleSmall.copy(fontFamily = family),
-        bodyLarge = AmberTypography.bodyLarge.copy(fontFamily = family),
-        bodyMedium = AmberTypography.bodyMedium.copy(fontFamily = family),
-        bodySmall = AmberTypography.bodySmall.copy(fontFamily = family),
-        labelLarge = AmberTypography.labelLarge.copy(fontFamily = family),
-        labelMedium = AmberTypography.labelMedium.copy(fontFamily = family),
-        labelSmall = AmberTypography.labelSmall.copy(fontFamily = family),
+        displayLarge = AmberTypography.displayLarge.withTypeface(family, weightOffset),
+        displayMedium = AmberTypography.displayMedium.withTypeface(family, weightOffset),
+        displaySmall = AmberTypography.displaySmall.withTypeface(family, weightOffset),
+        headlineLarge = AmberTypography.headlineLarge.withTypeface(family, weightOffset),
+        headlineMedium = AmberTypography.headlineMedium.withTypeface(family, weightOffset),
+        headlineSmall = AmberTypography.headlineSmall.withTypeface(family, weightOffset),
+        titleLarge = AmberTypography.titleLarge.withTypeface(family, weightOffset),
+        titleMedium = AmberTypography.titleMedium.withTypeface(family, weightOffset),
+        titleSmall = AmberTypography.titleSmall.withTypeface(family, weightOffset),
+        bodyLarge = AmberTypography.bodyLarge.withTypeface(family, weightOffset),
+        bodyMedium = AmberTypography.bodyMedium.withTypeface(family, weightOffset),
+        bodySmall = AmberTypography.bodySmall.withTypeface(family, weightOffset),
+        labelLarge = AmberTypography.labelLarge.withTypeface(family, weightOffset),
+        labelMedium = AmberTypography.labelMedium.withTypeface(family, weightOffset),
+        labelSmall = AmberTypography.labelSmall.withTypeface(family, weightOffset),
     )
 }

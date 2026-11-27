@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="amber_multi_device_mac">Mac</string>
+    <string name="amber_multi_device_not_paired">Not paired</string>
+    <string name="amber_multi_device_cloud_pair_hint">Scan the pairing QR code from amberd, or paste its pairing link.</string>
+    <string name="amber_multi_device_fingerprint_hint">Check that this fingerprint matches the one shown by the host.</string>
+    <string name="amber_multi_device_wrong_role">This pairing link belongs to the other tab.</string>
+    <string name="amber_multi_device_already_paired">This host is already paired in the other tab.</string>
+    <string name="amber_multi_device_pairing_changed">The pairing changed. Try again from its current connection.</string>
+    <string name="amber_multi_device_dialogue_section">Chat host</string>
+    <string name="amber_multi_device_dialogue_select">Use %1$s for chat</string>
+    <string name="amber_multi_device_dialogue_hint">When selected, new messages go to this host.</string>
+    <string name="amber_multi_device_dialogue_unavailable">This host is offline or does not support Amber dialogue.</string>
+    <string name="amber_multi_device_unpair_title">Unpair from %1$s?</string>
+    <string name="amber_multi_device_unpair_message">This removes this device’s pairing with the selected host.</string>
+    <string name="amber_multi_device_unpaired_offline">Unpaired on this device. The host could not confirm removal.</string>
+    <string name="amber_multi_device_unreachable">Cannot reach this host. Check its network and power.</string>
+    <string name="amber_multi_device_certificate">This host’s certificate has changed. Unpair and verify the new fingerprint before reconnecting.</string>
+    <string name="amber_multi_device_unauthorized">This host revoked your pairing. Pair again.</string>
+    <string name="amber_multi_device_camera_permission">Camera permission is required to scan a QR code.</string>
+    <string name="amber_multi_device_mac_dialogue">Mac Dialogue</string>
+    <string name="amber_multi_device_mac_running">Running on Mac…</string>
+</resources>

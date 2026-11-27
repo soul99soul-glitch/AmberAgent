@@ -1,19 +1,14 @@
 package app.amber.feature.ui.pages.setting
 
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
+import javax.xml.parsers.DocumentBuilderFactory
+import javax.xml.xpath.XPathFactory
 
 /**
- * P4 / A4.1 entry-point guard.
- *
- * `Screen.SettingExperimentalMacGateway` was routed and implemented but nothing navigated to it:
- * the only path went through `Screen.SettingExperimental`, a container page registered in the nav
- * graph that no call site ever opened. The whole Mac Gateway feature was therefore unreachable from
- * the product, which no unit test noticed because each page compiled and rendered on its own.
- *
- * This is a source-level check on purpose: the reachability property lives in the navigation call
- * sites, and any Compose UI test for it would be a slower duplicate of the same string search.
+ * Checks that a registered settings destination is also wired to an actual settings entry.
  */
 class SettingEntryPointReachabilityTest {
     /**
@@ -33,11 +28,19 @@ class SettingEntryPointReachabilityTest {
     }
 
     @Test
-    fun macGatewayPageIsReachableFromTheTopLevelSettingsPage() {
+    fun multiDevicePageIsReachableFromGeneralSettings() {
         val settings = source("app/src/main/java/app/amber/feature/ui/pages/setting/SettingPage.kt")
+        val general = settings.substringAfter("item(\"generalSettings\")", "")
+            .substringBefore("item(\"agentRuntimeSettings\")", "")
         assertTrue(
-            "SettingPage must offer a route into Mac Gateway, otherwise the page is unreachable",
-            settings.contains("navigate(Screen.SettingExperimentalMacGateway)"),
+            "General settings must offer an Amber Multi-device row wired to the gateway destination",
+            groupedEntry("SettingExperimentalMacGateway", "setting_home_multi_device_title")
+                .containsMatchIn(general),
+        )
+        assertTrue(
+            "Clicking a grouped settings row must navigate to that row's destination",
+            Regex("""SettingHomeRow\(entry,[^\n]+\)\s*\{\s*navController\.navigate\(entry\.screen\)\s*}""")
+                .containsMatchIn(settings),
         )
     }
 
@@ -48,6 +51,7 @@ class SettingEntryPointReachabilityTest {
             .orEmpty()
             .filter { it.name.endsWith(".kt") }
             .joinToString("\n") { it.readText() }
+        val registry = source("app/src/main/java/app/amber/agent/AppNavigationEntries.kt")
         // These four are the experimental children a user is meant to open directly.
         listOf(
             "SettingExperimentalMacGateway",
@@ -55,23 +59,25 @@ class SettingEntryPointReachabilityTest {
             "SettingExperimentalSubAgent",
             "SettingExperimentalWebMount",
         ).forEach { target ->
+            assertTrue("$target must be registered", registry.contains("entry<Screen.$target>"))
             assertTrue(
-                "$target is registered in the nav graph but no page navigates to it",
-                settingsPages.contains("navigate(Screen.$target)"),
+                "$target is registered in the nav graph but no settings entry opens it",
+                settingsPages.contains("navigate(Screen.$target)") || groupedEntry(target).containsMatchIn(settingsPages),
             )
         }
     }
 
     @Test
-    fun macGatewayTitleStringIsNotCollapsedToADuplicateOfItsDescription() {
-        val strings = source("app/src/main/res/values/strings.xml")
-        assertTrue(
-            "the settings row needs its own label",
-            strings.contains("""<string name="setting_page_mac_gateway">"""),
-        )
-        assertTrue(
-            "the settings row needs its own short description",
-            strings.contains("""<string name="setting_page_mac_gateway_desc">"""),
-        )
+    fun multiDeviceRowHasDistinctTitleAndSubtitle() {
+        val strings = File(repoRoot, "app/src/main/res/values/strings_settings_home.xml")
+        val document = DocumentBuilderFactory.newInstance().newDocumentBuilder().parse(strings)
+        val xpath = XPathFactory.newInstance().newXPath()
+        val title = xpath.evaluate("/resources/string[@name='setting_home_multi_device_title']", document).trim()
+        val subtitle = xpath.evaluate("/resources/string[@name='setting_home_multi_device_subtitle']", document).trim()
+        assertTrue("The row requires a title and a subtitle", title.isNotEmpty() && subtitle.isNotEmpty())
+        assertNotEquals(title, subtitle)
     }
+
+    private fun groupedEntry(target: String, label: String = "\\w+"): Regex =
+        Regex("""SettingHomeEntry\(\s*R\.string\.$label,\s*Lucide\.\w+,\s*Screen\.$target\b""")
 }

@@ -73,10 +73,6 @@ private fun continueFeatureSpec(sourceKind: ContinueSourceKind): ContinueFeature
         icon = Lucide.MessageCircle,
         label = stringResource(R.string.session_home_feature_council),
     )
-    ContinueSourceKind.DEEP_READ -> ContinueFeatureSpec(
-        icon = Lucide.BookOpenText,
-        label = stringResource(R.string.session_home_feature_deep_read),
-    )
     ContinueSourceKind.MINIAPP_DRAFT,
     ContinueSourceKind.MINIAPP_RUNNER,
     -> ContinueFeatureSpec(
@@ -86,10 +82,6 @@ private fun continueFeatureSpec(sourceKind: ContinueSourceKind): ContinueFeature
     ContinueSourceKind.IMAGE_GENERATION -> ContinueFeatureSpec(
         icon = Lucide.Image,
         label = stringResource(R.string.setting_page_built_in_tools_image_generation),
-    )
-    ContinueSourceKind.NOVEL_WORKSPACE -> ContinueFeatureSpec(
-        icon = Lucide.Pen,
-        label = stringResource(R.string.session_home_feature_novel),
     )
 }
 
@@ -148,9 +140,7 @@ private fun ContinueCandidateSubtitle(
 internal fun HomeFeatureRail(
     resumeCandidate: ContinueCandidate?,
     onOpenResume: (ContinueCandidate) -> Unit,
-    onDeepRead: () -> Unit,
     onMiniApps: () -> Unit,
-    onNovel: () -> Unit,
     onWebMount: () -> Unit,
     onCouncil: () -> Unit,
 ) {
@@ -160,25 +150,11 @@ internal fun HomeFeatureRail(
     val controlRadius = components?.controlRadius?.toFloat()?.dp
     val features = listOf(
         FeatureEntry(
-            Lucide.BookOpenText,
-            HomeSessionIcon.BOOK_OPEN,
-            HomePixelShortcut.BOOK,
-            stringResource(R.string.session_home_feature_deep_read),
-            onDeepRead,
-        ),
-        FeatureEntry(
             Lucide.Grid2x2,
             HomeSessionIcon.SQUARES_FOUR,
             HomePixelShortcut.GRID,
             stringResource(R.string.session_home_feature_mini_apps),
             onMiniApps,
-        ),
-        FeatureEntry(
-            Lucide.Pen,
-            HomeSessionIcon.NOTEBOOK,
-            HomePixelShortcut.NOTEBOOK,
-            stringResource(R.string.session_home_feature_novel),
-            onNovel,
         ),
         FeatureEntry(
             Lucide.Earth,

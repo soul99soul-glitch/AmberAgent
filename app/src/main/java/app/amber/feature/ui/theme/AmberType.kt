@@ -17,14 +17,9 @@ import androidx.compose.ui.unit.sp
  * Apply via [LocalAmberType] styles at call sites; never mono-set human prose, never sans-set
  * machine facts (design §3).
  *
- * [AmberSans] is Hanken Grotesk (bundled variable font, Latin UI). Hanken carries no hanzi, so
- * Chinese glyphs fall back to Android's system Noto Sans CJK (≈ Noto Sans SC) — on-brand today.
- * The mono signature is exact via bundled JetBrains Mono.
- *
- * TODO(fonts/D5): bundle a Noto Sans SC subset for pixel-exact CN rendering (future nicety; the
- * system CJK fallback is already close).
+ * [AmberSans] lets Android select the default Latin, CJK and locale-specific fallback faces.
  */
-val AmberSans: FontFamily = HankenGrotesk
+val AmberSans: FontFamily = FontFamily.SansSerif
 val AmberMono: FontFamily = JetBrainsMonoFamily
 
 @Immutable
@@ -68,16 +63,17 @@ fun defaultAmberTextStyles(): AmberTextStyles = AmberTextStyles(
 val LocalAmberType = staticCompositionLocalOf { defaultAmberTextStyles() }
 
 /** Home chrome, and settings only when requested by the portable document. */
-internal fun themeAmberTextStyles(typeface: String?): AmberTextStyles {
+internal fun themeAmberTextStyles(typeface: String?, weightOffset: Int = 0): AmberTextStyles {
     val base = defaultAmberTextStyles()
-    val family = chromeFontFamily(typeface) ?: return base
+    val family = chromeFontFamily(typeface)
+    if (family == null && weightOffset == 0) return base
     return base.copy(
-        screenTitle = base.screenTitle.copy(fontFamily = family),
-        sessionTitle = base.sessionTitle.copy(fontFamily = family),
-        body = base.body.copy(fontFamily = family),
-        secondary = base.secondary.copy(fontFamily = family),
-        meta = base.meta.copy(fontFamily = family),
-        eyebrow = base.eyebrow.copy(fontFamily = family),
-        tinyTag = base.tinyTag.copy(fontFamily = family),
+        screenTitle = base.screenTitle.withTypeface(family, weightOffset),
+        sessionTitle = base.sessionTitle.withTypeface(family, weightOffset),
+        body = base.body.withTypeface(family, weightOffset),
+        secondary = base.secondary.withTypeface(family, weightOffset),
+        meta = base.meta.withTypeface(family, weightOffset),
+        eyebrow = base.eyebrow.withTypeface(family, weightOffset),
+        tinyTag = base.tinyTag.withTypeface(family, weightOffset),
     )
 }

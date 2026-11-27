@@ -79,9 +79,7 @@ jobs:
           printf '%s\n' "$GOOGLE_SERVICES_JSON" > app/google-services.json
 
       - name: Gradle release build
-        # assembleFullRelease also verifies all eight required Rust libraries in
-        # every APK. `surface` flavors: release publishes the canonical `full`
-        # product only; standalone flavors (novel/deepread) build locally.
+        # assembleFullRelease also verifies the required Rust libraries in every APK.
         run: ./gradlew :app:assembleFullRelease -PuploadCrashlyticsMapping=false --no-daemon --console=plain
 
       - name: Verify release APK signatures

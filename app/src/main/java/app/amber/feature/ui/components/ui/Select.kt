@@ -60,7 +60,7 @@ fun <T> Select(
             shadowElevation = 0.dp,
             shape = CircleShape,
             color = chatTheme.accentSoft,
-            contentColor = chatTheme.accent,
+            contentColor = MaterialTheme.colorScheme.primary,
             border = BorderStroke(1.dp, chatTheme.accent.copy(alpha = 0.22f)),
             modifier = Modifier
                 .menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable)

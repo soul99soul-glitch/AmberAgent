@@ -199,7 +199,6 @@ internal data class SlashCommandItem(
 internal data class SlashCommandLabels(
     val clearDescription: String,
     val compactDescription: String,
-    val deepReadDescription: String,
     val subAgentDescription: String,
     val usageDescription: String,
     val skillFallbackDescription: String,
@@ -226,15 +225,6 @@ internal fun buildSlashCommandItems(
             title = "compact",
             description = labels.compactDescription,
             action = SlashCommandAction.CompactContext,
-        )
-    )
-    add(
-        SlashCommandItem(
-            id = "core.deepread",
-            title = "deepread",
-            description = labels.deepReadDescription,
-            action = SlashCommandAction.InsertText("/deepread "),
-            accent = true,
         )
     )
     if (subAgentEnabled) {

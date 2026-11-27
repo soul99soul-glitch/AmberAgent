@@ -170,12 +170,6 @@ class ChatSendStageTest {
         assertTrue(makeActions().longSend(PendingUserMessageMode.FOLLOWUP, parts, null))
         assertFalse(stage.isPending)
 
-        assertTrue(makeActions().send(
-            PendingUserMessageMode.FOLLOWUP,
-            listOf(UIMessagePart.Text("/deepread article")),
-            null,
-        ))
-        assertFalse("route commands do not arm a future chat message", stage.isPending)
         assertEquals(0, hideCount)
 
         // 8. Normal local send accepted -> arms stage with host="local" and hides keyboard.

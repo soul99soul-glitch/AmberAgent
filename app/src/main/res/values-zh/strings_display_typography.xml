@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="setting_typography_group">字体</string>
+    <string name="setting_typography_weight">字重</string>
+    <string name="setting_typography_weight_system">跟随系统</string>
+    <string name="setting_typography_weight_lighter">偏细</string>
+    <string name="setting_typography_weight_heavier">偏粗</string>
+    <string name="setting_typography_family_system">系统字体</string>
+    <string name="setting_typography_preview">**今日计划 · Today**\n\n14:30 和 Amber 一起整理 3 条笔记。</string>
+    <string name="setting_display_reply_delivery_mode_title">回复呈现方式</string>
+    <string name="setting_display_reply_delivery_live">实时流式</string>
+    <string name="setting_display_reply_delivery_segmented">分段呈现</string>
+    <string name="setting_display_agent_bubble_title">Agent 气泡模式</string>
+    <string name="setting_display_agent_bubble_desc">以圆角气泡卡片呈现 Agent 回复</string>
+    <string name="setting_display_thinking_disabled_in_segmented_desc">分段呈现模式下思考过程默认收起，切换回流式呈现后可开启。</string>
+    <string name="chat_inline_status_preparing_reply">正在整理回复</string>
+</resources>

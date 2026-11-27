@@ -4,39 +4,54 @@ import app.amber.feature.ui.utils.AmberTraceSection
 import app.amber.feature.ui.utils.ChatPerfCommandBridge
 import app.amber.feature.ui.utils.ChatPerfTrace
 import app.amber.feature.ui.utils.amberTraceMeasure
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScaffoldDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.boundsInWindow
-import androidx.compose.ui.layout.findRootCoordinates
-import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import java.util.concurrent.atomic.AtomicLong
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -45,8 +60,11 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
 import app.amber.core.recap.RECAP_MIN_USER_MESSAGES
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -54,6 +72,7 @@ import kotlinx.coroutines.flow.map
 import app.amber.ai.core.MessageRole
 import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.Model
+import app.amber.ai.provider.ModelAbility
 import app.amber.ai.provider.ModelType
 import app.amber.ai.ui.UIMessage
 import app.amber.ai.ui.UIMessagePart
@@ -61,6 +80,10 @@ import app.amber.feature.macgateway.MacGatewayRepository
 import app.amber.feature.prompts.AgentSoulStore
 import app.amber.feature.runtime.AgentToolActivityStore
 import app.amber.feature.ui.components.ai.AgentSoulSheet
+import app.amber.feature.ui.components.ai.ModelMenuReasoningFooter
+import app.amber.feature.ui.components.ai.ModelPickerSheet
+import app.amber.feature.ui.components.ai.pickerModelsByProvider
+import app.amber.feature.ui.components.ai.reasoningLevelsForModel
 import app.amber.core.settings.Settings
 import app.amber.core.settings.findProvider
 import app.amber.core.settings.defaultReasoningLevelForModel
@@ -75,6 +98,7 @@ import app.amber.feature.ui.components.ai.ChatInputSubmissionOwner
 import app.amber.feature.ui.components.ai.SandboxActivitySheet
 import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.components.ui.ImagePreviewDialog
+import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.context.Navigator
@@ -83,6 +107,7 @@ import app.amber.core.utils.navigateToChatPage
 import org.koin.compose.koinInject
 import kotlin.uuid.Uuid
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun ChatPageScaffold(
     timelineReady: Boolean,
@@ -119,21 +144,6 @@ internal fun ChatPageScaffold(
 ) {
     val toaster = LocalToaster.current
     val context = LocalContext.current
-    val chatProvidersForMenu = setting.providers.filter { provider ->
-        provider.enabled && provider.models.any { it.type == ModelType.CHAT }
-    }
-    val chatModelIdForMenu = setting.chatModelId
-    val currentProviderIdForMenu = chatProvidersForMenu.firstOrNull { provider ->
-        provider.models.any { it.id == chatModelIdForMenu }
-    }?.id
-    val currentReasoningLevelForMenu = currentChatModel?.let { model ->
-        setting.rememberedReasoningLevelsByModelId[model.id.toString()]
-            ?: if (setting.reasoningLevel == ReasoningLevel.AUTO) {
-                setting.defaultReasoningLevelForModel(model)
-            } else {
-                setting.reasoningLevel
-            }
-    }
     val resourceContext = context
     val localeTag = resourceContext.resources.configuration.locales.toLanguageTags()
     var previewMode by rememberSaveable { mutableStateOf(false) }
@@ -146,18 +156,13 @@ internal fun ChatPageScaffold(
     val soulState by agentSoulStore.state.collectAsStateWithLifecycle()
     var agentSoulSheetOpen by rememberSaveable { mutableStateOf(false) }
     val localAsyncTaskCoordinator: app.amber.core.service.LocalAsyncTaskCoordinator = koinInject()
-    // R6-4: Subscribe only to the boolean cloud dialogue activation slice at scaffold root so
-    // cursor advances, gateway reachability polls, and other-conversation tasks never recompose
-    // the chat scaffold.
-    val isCloudDialogueActiveFlow = remember(macGatewayRepository) {
-        macGatewayRepository.state
-            .map { it.isCloudDialogueActive }
-            .distinctUntilChanged()
-    }
-    val isCloudDialogueActive by isCloudDialogueActiveFlow.collectAsStateWithLifecycle(
-        initialValue = macGatewayRepository.state.value.isCloudDialogueActive,
-    )
-    val composerGeneration = macGatewayRepository.connectionGeneration.collectAsStateWithLifecycle().value
+    val selectedRole by macGatewayRepository.selectedDialogueRole.collectAsStateWithLifecycle()
+    val personalAgentStage = LocalChatStageMode.current as? ChatStageMode.PersonalAgent
+    val dialogueRole = if (personalAgentStage != null) personalAgentStage.dialogueRole else selectedRole
+    val remoteGateway = dialogueRole?.let(macGatewayRepository::slot)
+    val isCloudDialogueActive = remoteGateway != null
+    val connectionGeneration = remoteGateway?.connectionGeneration?.collectAsStateWithLifecycle()?.value
+    val composerGeneration = personalAgentStage?.dialogueGeneration ?: connectionGeneration
     val cloudScope = rememberCoroutineScope()
     val conversationIdString = conversation.id.toString()
     val focusManager = LocalFocusManager.current
@@ -167,14 +172,29 @@ internal fun ChatPageScaffold(
     DisposableEffect(sendStage) {
         onDispose { sendStage.reset() }
     }
-    LaunchedEffect(conversationIdString, isCloudDialogueActive) {
+    LaunchedEffect(conversationIdString, remoteGateway, composerGeneration) {
         sendStage.reset()
-        if (isCloudDialogueActive) {
-            macGatewayRepository.bindActiveConversation(conversationIdString)
+        if (remoteGateway != null) {
+            remoteGateway.bindActiveConversation(conversationIdString, composerGeneration)
         } else {
             localAsyncTaskCoordinator.bindActiveConversation(conversation.id)
         }
     }
+    val activeTaskProgressFlow = remember(conversationIdString, remoteGateway, localAsyncTaskCoordinator) {
+        val sourceFlow = remoteGateway?.cloudDialogueState ?: localAsyncTaskCoordinator.uiState
+        sourceFlow
+            .map { state ->
+                state.activeTasksForConversation(conversationIdString)
+                    .lastOrNull()
+                    ?.progressText
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+            }
+            .distinctUntilChanged()
+    }
+    val activeTaskProgressText by activeTaskProgressFlow.collectAsStateWithLifecycle(initialValue = null)
+    val effectiveProcessingStatus = processingStatus?.trim()?.takeIf { it.isNotEmpty() }
+        ?: activeTaskProgressText
     val liveSandboxActivity by activityStore.sandboxActivity.collectAsStateWithLifecycle()
     val sandboxProjection = rememberChatSandboxProjection(
         conversation = conversation,
@@ -206,8 +226,8 @@ internal fun ChatPageScaffold(
         conversationId = conversationIdString,
         sendStage = sendStage,
         isFollowupTargetActive = {
-            if (isCloudDialogueActive) {
-                macGatewayRepository.cloudDialogueState.value.resolvedFollowupTarget(conversationIdString) != null
+            if (remoteGateway != null) {
+                remoteGateway.cloudDialogueState.value.resolvedFollowupTarget(conversationIdString) != null
             } else {
                 vm.pendingUserMessages.value.isNotEmpty() ||
                     localAsyncTaskCoordinator.uiState.value.activeTasksForConversation(conversationIdString).isNotEmpty()
@@ -221,24 +241,26 @@ internal fun ChatPageScaffold(
         showError = { messageRes ->
             toaster.show(context.getString(messageRes), type = ToastType.Error)
         },
-        sendMessage = { parts, answer, queueMode, messageId ->
-            if (isCloudDialogueActive) {
+        sendMessage = send@{ parts, answer, queueMode, messageId ->
+            if (dialogueRole != macGatewayRepository.selectedDialogueRole.value) return@send null
+            if (remoteGateway != null) {
                 val text = parts
                     .filterIsInstance<UIMessagePart.Text>()
                     .joinToString("\n") { it.text }
                     .trim()
-                if (text.isEmpty() || !macGatewayRepository.state.value.isCloudDialogueActive ||
-                    composerGeneration != macGatewayRepository.connectionGeneration.value
+                if (text.isEmpty() || !remoteGateway.state.value.isCloudDialogueActive ||
+                    composerGeneration != remoteGateway.connectionGeneration.value
                 ) {
                     null
                 } else {
-                    val followupTarget = macGatewayRepository.cloudDialogueState.value
+                    val followupTarget = remoteGateway.cloudDialogueState.value
                         .resolvedFollowupTarget(conversationIdString)
                     val admitted = CompletableDeferred<Boolean>()
                     cloudScope.launch {
                         try {
+                            if (dialogueRole != macGatewayRepository.selectedDialogueRole.value) return@launch
                             if (followupTarget != null) {
-                                macGatewayRepository.sendCloudFollowup(
+                                remoteGateway.sendCloudFollowup(
                                     conversationId = conversationIdString,
                                     workItemId = followupTarget.workItemId,
                                     text = text,
@@ -247,7 +269,7 @@ internal fun ChatPageScaffold(
                                     onLocalEcho = { admitted.complete(true) },
                                 )
                             } else {
-                                macGatewayRepository.sendCloudMessage(
+                                remoteGateway.sendCloudMessage(
                                     conversationId = conversationIdString,
                                     text = text,
                                     requestId = messageId.toString(),
@@ -312,15 +334,22 @@ internal fun ChatPageScaffold(
         }
     }
 
-    // Graphite TopModelMenu: header 下方卷帘下拉的开合状态（顶栏触发器 + 内容区 overlay 共享）
-    var modelMenuOpen by remember { mutableStateOf(false) }
-    // 菜单挂在 app shell 的模态层上（遮罩必须盖住 header、输入区以及展开屏左侧列表），
-    // 但面板仍要从 header 正下方、聊天栏内展开，所以记下 Scaffold 测出的顶栏高度
-    // （content 的 innerPadding.top）与聊天栏相对应用窗口的起始边距（适配 LTR/RTL）。
-    var headerInset by remember { mutableStateOf(0.dp) }
-    var chatPaneStartInset by remember { mutableStateOf(0.dp) }
-    val windowDensity = LocalDensity.current
-    val layoutDirection = LocalLayoutDirection.current
+    val canChooseChatModel = !isCloudDialogueActive || inputState.isEditing()
+    val composerFocusRequester = remember(conversation.id) { FocusRequester() }
+    var composerInputFocused by remember(conversation.id) { mutableStateOf(false) }
+    var keyboardDismissRequested by remember(conversation.id) { mutableStateOf(false) }
+    var modelPickerOpen by remember(conversation.id, dialogueRole, canChooseChatModel) { mutableStateOf(false) }
+    var modelPickerOpening by remember(conversation.id, dialogueRole, canChooseChatModel) { mutableStateOf(false) }
+    var restoreKeyboardAfterModelPicker by remember(conversation.id, dialogueRole, canChooseChatModel) { mutableStateOf(false) }
+    var modelSelectedDuringPicker by remember(conversation.id, dialogueRole, canChooseChatModel) { mutableStateOf(false) }
+    var pendingRestoreKeyboard by remember(conversation.id, dialogueRole, canChooseChatModel) { mutableStateOf(false) }
+    val density = LocalDensity.current
+    val windowInfo = LocalWindowInfo.current
+    val imeVisible = WindowInsets.isImeVisible
+    // Keep only the stable WindowInsets reference here; NEVER call imeInsets.getBottom(density)
+    // in composition or the entire ChatPageScaffold will recompose on every 120Hz IME frame.
+    val imeInsets = WindowInsets.ime
+    val latestWindowFocused = rememberUpdatedState(windowInfo.isWindowFocused)
     // Header island: recap panel, shelf panel, and timeline jumps they trigger.
     var recapOpen by remember(conversation.id) { mutableStateOf(false) }
     var shelfOpen by remember(conversation.id) { mutableStateOf(false) }
@@ -397,6 +426,104 @@ internal fun ChatPageScaffold(
         shelfOpen = false
         activityOpen = false
     }
+    fun toggleShelf() {
+        if (shelfOpen) {
+            shelfOpen = false
+        } else {
+            recapOpen = false
+            activityOpen = false
+            focusManager.clearFocus(force = true)
+            keyboardController?.hide()
+            shelfOpen = true
+        }
+    }
+    val modeOverlayOpen = personalAgentStage?.isModeOverlayOpen == true
+    LaunchedEffect(modeOverlayOpen) {
+        if (modeOverlayOpen) {
+            closeHeaderPanels()
+            keyboardDismissRequested = false
+            modelPickerOpening = false
+            restoreKeyboardAfterModelPicker = false
+            modelSelectedDuringPicker = false
+            pendingRestoreKeyboard = false
+            modelPickerOpen = false
+            keyboardController?.hide()
+            if (!imeVisible) {
+                focusManager.clearFocus(force = true)
+            }
+        }
+    }
+    LaunchedEffect(keyboardDismissRequested, imeVisible) {
+        if (!keyboardDismissRequested) return@LaunchedEffect
+        if (!imeVisible) {
+            // Native IME hide finished (or IME was already hidden): now silently clear focus
+            // without interrupting any in-flight WindowInsetsAnimation.
+            focusManager.clearFocus(force = true)
+            keyboardDismissRequested = false
+        }
+    }
+    LaunchedEffect(modelPickerOpening) {
+        if (!modelPickerOpening) return@LaunchedEffect
+        // Let the native soft keyboard close uninterrupted before clearing focus and raising the
+        // bottom sheet so the two windows never fight or stutter.
+        withTimeoutOrNull(280L) {
+            snapshotFlow { imeInsets.getBottom(density) == 0 }.first { it }
+        }
+        focusManager.clearFocus(force = true)
+        delay(16L)
+        if (modelPickerOpening) {
+            modelPickerOpening = false
+            modelPickerOpen = true
+        }
+    }
+    LaunchedEffect(pendingRestoreKeyboard, modelPickerOpen) {
+        if (!pendingRestoreKeyboard || modelPickerOpen) return@LaunchedEffect
+        // Wait for the ModalBottomSheet dialog window to detach so InputMethodManager accepts
+        // the show request on the first try.
+        withTimeoutOrNull(260L) {
+            snapshotFlow { latestWindowFocused.value }.first { it }
+        }
+        delay(36L)
+        try {
+            keyboardDismissRequested = false
+            composerFocusRequester.requestFocus()
+            keyboardController?.show()
+        } finally {
+            pendingRestoreKeyboard = false
+        }
+    }
+    fun openModelPicker() {
+        if (modelPickerOpen || modelPickerOpening) return
+        closeHeaderPanels()
+        val wasKeyboardActive = composerInputFocused || imeVisible
+        restoreKeyboardAfterModelPicker = wasKeyboardActive
+        modelSelectedDuringPicker = false
+        pendingRestoreKeyboard = false
+        keyboardDismissRequested = false
+        if (wasKeyboardActive && imeInsets.getBottom(density) > 0) {
+            // Hide keyboard first via WindowInsetsController WITHOUT tearing down InputConnection
+            // via clearFocus(), preserving the native 120Hz close animation.
+            modelPickerOpening = true
+            keyboardController?.hide()
+        } else {
+            focusManager.clearFocus(force = true)
+            keyboardController?.hide()
+            modelPickerOpen = true
+        }
+    }
+    fun toggleRecap() {
+        if (recapOpen) {
+            recapOpen = false
+        } else {
+            closeHeaderPanels()
+            recapOpen = true
+            vm.requestRecap()
+        }
+    }
+    fun jumpToLive() {
+        closeHeaderPanels()
+        jumpToLiveKey += 1
+    }
     CompositionLocalProvider(
         LocalTimelineHighlight provides timelineHighlight,
         LocalChatSendStage provides sendStage,
@@ -404,16 +531,7 @@ internal fun ChatPageScaffold(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .amberCanvas()
-                .onGloballyPositioned { coordinates ->
-                    chatPaneStartInset = with(windowDensity) {
-                        chatPaneStartInsetPx(
-                            coordinates.boundsInWindow(),
-                            coordinates.findRootCoordinates().boundsInWindow(),
-                            layoutDirection,
-                        ).toDp()
-                    }
-                },
+                .amberCanvas(),
         ) {
             Scaffold(
                 modifier = Modifier.amberTraceMeasure("Amber ChatPage measure"),
@@ -427,7 +545,6 @@ internal fun ChatPageScaffold(
                         onBack = {
                             navController.returnToSessionHome()
                         },
-                        currentChatModel = currentChatModel,
                         generating = loadingJob != null,
                         processingStatus = processingStatus,
                         recapEligible = recapEligible,
@@ -435,50 +552,20 @@ internal fun ChatPageScaffold(
                         shelfOpen = shelfOpen,
                         activityOpen = activityOpen,
                         otherActivityCount = otherActivity.size,
-                        modelMenuOpen = modelMenuOpen,
                         soulDisplayName = soulState.displayName,
                         soulIsDefault = soulState.isDefault,
                         onOpenAgentSoul = {
                             closeHeaderPanels()
-                            modelMenuOpen = false
                             agentSoulSheetOpen = true
                         },
-                        onToggleModelMenu = {
-                            closeHeaderPanels()
-                            modelMenuOpen = !modelMenuOpen
-                        },
-                        onIslandOpenRecap = {
-                            if (recapOpen) {
-                                recapOpen = false
-                            } else {
-                                modelMenuOpen = false
-                                shelfOpen = false
-                                activityOpen = false
-                                recapOpen = true
-                                vm.requestRecap()
-                            }
-                        },
-                        onIslandJumpToLive = {
-                            closeHeaderPanels()
-                            modelMenuOpen = false
-                            jumpToLiveKey += 1
-                        },
+                        onIslandOpenRecap = ::toggleRecap,
+                        onIslandJumpToLive = ::jumpToLive,
                         onIslandStop = { vm.stopGeneration() },
-                        onToggleShelf = {
-                            if (shelfOpen) {
-                                shelfOpen = false
-                            } else {
-                                modelMenuOpen = false
-                                recapOpen = false
-                                activityOpen = false
-                                shelfOpen = true
-                            }
-                        },
+                        onToggleShelf = ::toggleShelf,
                         onToggleActivity = {
                             if (activityOpen) {
                                 activityOpen = false
                             } else {
-                                modelMenuOpen = false
                                 recapOpen = false
                                 shelfOpen = false
                                 activityOpen = true
@@ -529,19 +616,27 @@ internal fun ChatPageScaffold(
                             inputActions.sendSuggestion(suggestion)
                         },
                         onConfigureModel = {
-                            if (configurationIssue == ChatConfigurationIssue.MissingModel && chatProvidersForMenu.isNotEmpty()) {
-                                modelMenuOpen = true
-                            } else {
-                                val owner = currentChatModel?.findProvider(setting.providers, checkOverwrite = false)
-                                navController.navigate(owner?.let { Screen.SettingProviderDetail(it.id.toString()) } ?: Screen.SettingProvider)
-                            }
+                            val owner = currentChatModel?.findProvider(setting.providers, checkOverwrite = false)
+                            navController.navigate(owner?.let { Screen.SettingProviderDetail(it.id.toString()) } ?: Screen.SettingProvider)
                         },
                         onOpenConversation = { sourceId -> navController.navigate(Screen.Chat(id = sourceId.toString())) },
                         onOpenWebMountSession = { sessionId, reopen ->
                             navController.navigate(Screen.WebMountSession(sessionId = sessionId, reopen = reopen))
                         },
                         onStop = vm::stopGeneration,
-                        onUpdateChatModel = { vm.setChatModel(model = it) },
+                        currentChatModel = currentChatModel,
+                        onOpenModelPicker = if (canChooseChatModel) ::openModelPicker else null,
+                        modelPickerOpen = modelPickerOpen,
+                        modelPickerTransitioning = modelPickerOpening || pendingRestoreKeyboard,
+                        keyboardDismissRequested = keyboardDismissRequested,
+                        modeOverlayOpen = modeOverlayOpen,
+                        inputFocused = composerInputFocused,
+                        onInputFocusChanged = { focused ->
+                            composerInputFocused = focused
+                            if (focused) keyboardDismissRequested = false
+                        },
+                        composerFocusRequester = composerFocusRequester,
+                        onSelectReasoningLevel = vm::setChatReasoningLevel,
                         onUpdateSettings = vm::updateSettings,
                         onCompactContext = {
                             vm.handleCompressContext(
@@ -556,15 +651,52 @@ internal fun ChatPageScaffold(
                 },
                 containerColor = Color.Transparent,
             ) { innerPadding ->
-                val effectiveTopInset = if (isPersonalAgentStage) {
-                    floatingTopInset
-                } else {
-                    innerPadding.calculateTopPadding()
+                // Defer innerPadding reads to layout phase so per-frame IME height updates in
+                // Scaffold's bottomBar never trigger composition of the whole timeline content.
+                val panelOverlayPadding = remember(isPersonalAgentStage, floatingTopInset, innerPadding) {
+                    object : PaddingValues {
+                        override fun calculateLeftPadding(layoutDirection: LayoutDirection) =
+                            innerPadding.calculateStartPadding(layoutDirection)
+                        override fun calculateTopPadding() =
+                            if (isPersonalAgentStage) floatingTopInset else innerPadding.calculateTopPadding()
+                        override fun calculateRightPadding(layoutDirection: LayoutDirection) =
+                            innerPadding.calculateEndPadding(layoutDirection)
+                        override fun calculateBottomPadding() = innerPadding.calculateBottomPadding()
+                    }
                 }
-                if (headerInset != effectiveTopInset) {
-                    SideEffect { headerInset = effectiveTopInset }
-                }
-                Box(modifier = Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(
+                            if (composerInputFocused || imeVisible) {
+                                Modifier.pointerInput(Unit) {
+                                    awaitEachGesture {
+                                        val down = awaitFirstDown(
+                                            requireUnconsumed = false,
+                                            pass = PointerEventPass.Final,
+                                        )
+                                        val up = waitForUpOrCancellation(pass = PointerEventPass.Final)
+                                        if (up != null && !down.isConsumed && !up.isConsumed &&
+                                            (up.position - down.position).getDistance() <= viewConfiguration.touchSlop
+                                        ) {
+                                            if (imeInsets.getBottom(density) > 0) {
+                                                // Hide via native WindowInsetsController first;
+                                                // clearFocus() runs silently once !imeVisible so
+                                                // the native IME close animation never stutters.
+                                                keyboardDismissRequested = true
+                                                keyboardController?.hide()
+                                            } else {
+                                                focusManager.clearFocus(force = true)
+                                                keyboardController?.hide()
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                Modifier
+                            },
+                        ),
+                ) {
                     ChatPageTimelineHost(
                         timelineReady = timelineReady,
                         timelinePrepared = timelinePrepared,
@@ -573,7 +705,7 @@ internal fun ChatPageScaffold(
                         inputState = inputState,
                         inputActions = inputActions,
                         loading = loadingJob != null,
-                        processingStatus = processingStatus,
+                        processingStatus = effectiveProcessingStatus,
                         setting = setting,
                         timelineLoadState = timelineLoadState,
                         contextCompacts = contextCompacts,
@@ -609,35 +741,27 @@ internal fun ChatPageScaffold(
                         PersonalAgentTopChromeOverlay(
                             stage = stage,
                             conversationFlow = vm.conversation,
-                            currentChatModel = currentChatModel,
+                            generativeUiSetting = setting.agentRuntime.generativeUi,
                             generating = loadingJob != null,
-                            recapEligible = recapEligible,
                             soulDisplayName = soulState.displayName,
+                            shelfOpen = shelfOpen,
                             onOpenWorkspace = {
                                 closeHeaderPanels()
-                                modelMenuOpen = false
                                 workspaceSheetOpen = true
                             },
                             onOpenAgentSoul = {
                                 closeHeaderPanels()
-                                modelMenuOpen = false
                                 agentSoulSheetOpen = true
                             },
-                            onToggleModelMenu = {
-                                closeHeaderPanels()
-                                modelMenuOpen = !modelMenuOpen
-                            },
-                            onOpenRecap = {
-                                if (recapOpen) {
-                                    recapOpen = false
-                                } else {
-                                    modelMenuOpen = false
-                                    shelfOpen = false
-                                    activityOpen = false
-                                    recapOpen = true
-                                    vm.requestRecap()
+                            onTopicClick = {
+                                when {
+                                    loadingJob != null -> jumpToLive()
+                                    recapEligible -> toggleRecap()
+                                    else -> toaster.show(context.getString(R.string.chat_island_recap_hint))
                                 }
                             },
+                            onStop = vm::stopGeneration,
+                            onToggleShelf = ::toggleShelf,
                             modifier = Modifier.align(Alignment.TopCenter),
                         )
                     }
@@ -664,10 +788,7 @@ internal fun ChatPageScaffold(
                             }
                             suggestionFillPulseKey += 1
                         },
-                        modifier = Modifier.padding(
-                            top = effectiveTopInset,
-                            bottom = innerPadding.calculateBottomPadding(),
-                        ),
+                        modifier = Modifier.padding(panelOverlayPadding),
                     )
                     ChatShelfPanelHost(
                         conversationFlow = vm.conversation,
@@ -683,20 +804,14 @@ internal fun ChatPageScaffold(
                                 jumpTarget = TimelineJumpTarget(item.nodeId, item.messageId)
                             }
                         },
-                        modifier = Modifier.padding(
-                            top = effectiveTopInset,
-                            bottom = innerPadding.calculateBottomPadding(),
-                        ),
+                        modifier = Modifier.padding(panelOverlayPadding),
                     )
 
                     ChatActivityPanelHost(
                         visible = activityOpen,
                         notices = otherActivity,
                         onDismiss = { activityOpen = false },
-                        modifier = Modifier.padding(
-                            top = effectiveTopInset,
-                            bottom = innerPadding.calculateBottomPadding(),
-                        ),
+                        modifier = Modifier.padding(panelOverlayPadding),
                         onOpen = { notice ->
                             val target = activityNoticeNavigationTarget(
                                 notice.conversationId,
@@ -715,46 +830,70 @@ internal fun ChatPageScaffold(
                 }  // end outer Box (fillMaxSize)
             }
 
-            // Graphite TopModelMenu —— 发布到 app shell 的模态层：遮罩铺满整个应用窗口
-            // （header、输入区、展开屏左侧会话列表），面板仍从 header 正下方、聊天栏内卷帘展开。
-            // 只挂在 ChatPage 自己身上时，header 返回和左栏设置会在第一次点击时穿透。
-            ChatModelMenuOverlay(
-                open = modelMenuOpen,
-                providers = chatProvidersForMenu,
-                currentProviderId = currentProviderIdForMenu,
-                currentModelId = chatModelIdForMenu,
-                onSelect = { model ->
-                    vm.setChatModel(model = model)
-                    modelMenuOpen = false
-                },
-                onClose = { modelMenuOpen = false },
-                reasoningLevel = currentReasoningLevelForMenu,
-                onUpdateReasoningLevel = { level ->
-                    currentChatModel?.let { model ->
-                        vm.updateSettings(
-                            setting.copy(
-                                reasoningLevel = level,
-                                rememberedReasoningLevelsByModelId =
-                                    setting.rememberedReasoningLevelsByModelId +
-                                        (model.id.toString() to level),
+            if (modelPickerOpen) {
+                val providers = setting.providers.filter { it.enabled }
+                val availableModels = remember(providers) {
+                    providers.pickerModelsByProvider(ModelType.CHAT, preferredInputModality = null)
+                }
+                val hasModels = availableModels.values.any { it.isNotEmpty() }
+                val reasoningModel = currentChatModel?.takeIf { ModelAbility.REASONING in it.abilities }
+                val reasoningLevels = reasoningModel?.let(::reasoningLevelsForModel).orEmpty()
+                // Freeze footer presence for this open session so picking a reasoning model does
+                // not suddenly insert a footer mid-dismiss and jerk the sheet height.
+                val showReasoningFooter = remember {
+                    reasoningModel != null && reasoningLevels.isNotEmpty()
+                }
+                ModelPickerSheet(
+                    modelId = setting.chatModelId.takeIf { currentChatModel != null },
+                    providers = providers,
+                    type = ModelType.CHAT,
+                    allowPartialExpansion = true,
+                    onSelect = { model ->
+                        modelSelectedDuringPicker = true
+                        vm.setChatModel(model)
+                    },
+                    onDismiss = {
+                        val shouldReopenKeyboard = restoreKeyboardAfterModelPicker && modelSelectedDuringPicker
+                        restoreKeyboardAfterModelPicker = false
+                        modelSelectedDuringPicker = false
+                        modelPickerOpen = false
+                        if (shouldReopenKeyboard) {
+                            pendingRestoreKeyboard = true
+                        }
+                    },
+                    header = {
+                        if (!hasModels) {
+                            TextButton(
+                                onClick = {
+                                    restoreKeyboardAfterModelPicker = false
+                                    modelSelectedDuringPicker = false
+                                    modelPickerOpen = false
+                                    navController.navigate(Screen.SettingProvider)
+                                },
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                            ) {
+                                Text(stringResource(R.string.chat_setup_configure))
+                            }
+                        } else if (conversation.messageNodes.isNotEmpty()) {
+                            ChatModelMenuUsageHeader(vm.conversation, contextCompacts, currentChatModel)
+                        }
+                    },
+                    footer = if (showReasoningFooter && reasoningModel != null && reasoningLevels.isNotEmpty()) {
+                        {
+                            ModelMenuReasoningFooter(
+                                currentLevel = setting.rememberedReasoningLevelsByModelId[reasoningModel.id.toString()]
+                                    ?: if (setting.reasoningLevel == ReasoningLevel.AUTO) {
+                                        setting.defaultReasoningLevelForModel(reasoningModel)
+                                    } else {
+                                        setting.reasoningLevel
+                                    },
+                                levels = reasoningLevels,
+                                onChange = { level -> vm.setChatReasoningLevel(reasoningModel.id, level) },
                             )
-                        )
-                    }
-                },
-                panelTopInset = headerInset,
-                panelStartInset = chatPaneStartInset,
-                header = if (conversation.messageNodes.isNotEmpty()) {
-                    {
-                        ChatModelMenuUsageHeader(
-                            conversationFlow = vm.conversation,
-                            contextCompacts = contextCompacts,
-                            currentChatModel = currentChatModel,
-                        )
-                    }
-                } else {
-                    null
-                },
-            )
+                        }
+                    } else null,
+                )
+            }
 
             if (sandboxOverlayOpen && sandboxActivity != null) {
                 SandboxActivitySheet(
@@ -804,7 +943,6 @@ internal fun ChatPageScaffold(
                     { workspaceSheetOpen = false },
                     {
                         workspaceSheetOpen = false
-                        modelMenuOpen = false
                         recapOpen = false
                         activityOpen = false
                         shelfOpen = true
@@ -812,7 +950,6 @@ internal fun ChatPageScaffold(
                     {
                         workspaceSheetOpen = false
                         closeHeaderPanels()
-                        modelMenuOpen = false
                         agentSoulSheetOpen = true
                     },
                 )
@@ -825,36 +962,55 @@ internal fun ChatPageScaffold(
 private fun PersonalAgentTopChromeOverlay(
     stage: ChatStageMode.PersonalAgent,
     conversationFlow: kotlinx.coroutines.flow.StateFlow<Conversation>,
-    currentChatModel: Model?,
+    generativeUiSetting: app.amber.core.settings.GenerativeUiSetting,
     generating: Boolean,
-    recapEligible: Boolean,
     soulDisplayName: String,
+    shelfOpen: Boolean,
     onOpenWorkspace: () -> Unit,
     onOpenAgentSoul: () -> Unit,
-    onToggleModelMenu: () -> Unit,
-    onOpenRecap: () -> Unit,
+    onTopicClick: () -> Unit,
+    onStop: () -> Unit,
+    onToggleShelf: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val titleFlow = remember(conversationFlow) {
         conversationFlow.map { it.title }.distinctUntilChanged()
     }
     val title by titleFlow.collectAsStateWithLifecycle(initialValue = conversationFlow.value.title)
-    val modelShortName = remember(currentChatModel) {
-        currentChatModel?.displayName?.takeIf { it.isNotBlank() }
-            ?: currentChatModel?.modelId?.substringAfterLast('/')
+    val nodeCountFlow = remember(conversationFlow) {
+        conversationFlow.map { it.id to it.messageNodes.size }.distinctUntilChanged()
+    }
+    val nodeCountKey by nodeCountFlow.collectAsStateWithLifecycle(
+        initialValue = conversationFlow.value.let { it.id to it.messageNodes.size },
+    )
+    val shelfItemCount by produceState(
+        initialValue = 0,
+        nodeCountKey,
+        generating,
+        generativeUiSetting,
+    ) {
+        val snapshot = conversationFlow.value
+        value = if (snapshot.messageNodes.isEmpty()) {
+            0
+        } else {
+            kotlinx.coroutines.withContext(Dispatchers.Default) {
+                snapshot.collectShelfItems(generativeUiSetting).size
+            }
+        }
     }
     Box(modifier = modifier) {
         stage.topChrome(
             PersonalAgentTopBarState(
                 title = title,
-                modelShortName = modelShortName,
                 generating = generating,
-                recapEligible = recapEligible,
                 soulDisplayName = soulDisplayName,
+                shelfOpen = shelfOpen,
+                shelfItemCount = shelfItemCount,
                 onOpenWorkspace = onOpenWorkspace,
                 onOpenAgentSoul = onOpenAgentSoul,
-                onToggleModelMenu = onToggleModelMenu,
-                onOpenRecap = onOpenRecap,
+                onTopicClick = onTopicClick,
+                onStop = onStop,
+                onToggleShelf = onToggleShelf,
             ),
         )
     }

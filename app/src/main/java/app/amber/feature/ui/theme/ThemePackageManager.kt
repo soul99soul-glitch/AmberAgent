@@ -292,7 +292,7 @@ class ThemePackageManager(
         }
     }
 
-    /** Pi / Notion presets: applied like a library pack but never stored, so never removable. */
+    /** Built-in recipes are applied without creating a removable library entry. */
     suspend fun applyBuiltinPack(id: String): ThemePackageApplyResult {
         require(id in ThemePackTransfer.builtinPackIds) { "未知的内置主题：$id" }
         val pkg = ThemePackTransfer.asPackage(requireNotNull(ThemePackTransfer.builtin(id)))
@@ -327,7 +327,9 @@ class ThemePackageManager(
                 // Remove only the marker from the latest settings snapshot. The transform
                 // avoids overwriting concurrent settings edits with the pre-delete snapshot.
                 settingsStore.update { latest ->
-                    if (latest.displaySetting.appliedThemePackageId == packageId) {
+                    val builtin = packageId in ThemePackTransfer.builtinPackIds &&
+                        latest.displaySetting.themePack == ThemePackTransfer.builtin(packageId)
+                    if (latest.displaySetting.appliedThemePackageId == packageId && !builtin) {
                         latest.copy(
                             displaySetting = latest.displaySetting.copy(
                                 appliedThemePackageId = null,

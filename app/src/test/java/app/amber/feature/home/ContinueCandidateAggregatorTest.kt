@@ -68,10 +68,10 @@ class ContinueCandidateAggregatorTest {
         val source = FakeSource(
             listOf(
                 candidate(ContinueSourceKind.COUNCIL, "c", ContinueStatus.FAILED_RESUMABLE, t0.plusSeconds(5)),
-                candidate(ContinueSourceKind.DEEP_READ, "d", ContinueStatus.FAILED_RESUMABLE, t0.plusSeconds(1)),
+                candidate(ContinueSourceKind.IMAGE_GENERATION, "d", ContinueStatus.FAILED_RESUMABLE, t0.plusSeconds(1)),
                 candidate(ContinueSourceKind.COUNCIL, "w", ContinueStatus.WAITING_USER, t0.plusSeconds(2)),
                 candidate(ContinueSourceKind.MINIAPP_DRAFT, "draft-old", ContinueStatus.DRAFT, t0.minusSeconds(9)),
-                candidate(ContinueSourceKind.DEEP_READ, "p", ContinueStatus.PAUSED, t0.minusSeconds(3)),
+                candidate(ContinueSourceKind.IMAGE_GENERATION, "p", ContinueStatus.PAUSED, t0.minusSeconds(3)),
                 candidate(ContinueSourceKind.COUNCIL, "pinned", ContinueStatus.PAUSED, t0.minusSeconds(1), priority = 5),
             ),
         )
@@ -141,7 +141,7 @@ class ContinueCandidateAggregatorTest {
     fun `route parameters are passed through unchanged`() = runTest {
         val routes = listOf<ContinueRoute>(
             ContinueRoute.CouncilRoom(conversationId = "conv-456"),
-            ContinueRoute.DeepRead(topicId = "topic-789", title = "某个话题"),
+            ContinueRoute.MiniAppRunner(appId = "app-789"),
             ContinueRoute.Chat(conversationId = "chat-000"),
         )
         val source = FakeSource(

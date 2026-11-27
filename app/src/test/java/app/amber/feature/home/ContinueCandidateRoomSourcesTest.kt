@@ -3,21 +3,14 @@ package app.amber.feature.home
 import android.app.Application
 import android.content.Context
 import androidx.room.Room
-import androidx.work.WorkInfo
 import app.amber.agent.data.db.AppDatabase
 import app.amber.agent.data.db.entity.ConversationDraftEntity
 import app.amber.agent.data.db.entity.ConversationEntity
-import app.amber.agent.data.db.entity.DeepReadCacheEntity
 import app.amber.agent.data.db.entity.MiniAppEntity
 import app.amber.agent.data.db.entity.MiniAppVersionEntity
 import app.amber.agent.data.db.entity.RunTerminalEntity
 import app.amber.agent.data.db.entity.ToolEffectEntity
 import app.amber.core.utils.JsonInstant
-import app.amber.feature.board.hotlist.deepread.DeepReadGenerationPhase
-import app.amber.feature.board.hotlist.deepread.DeepReadGenerationStage
-import app.amber.feature.board.hotlist.deepread.DeepReadOutput
-import app.amber.feature.board.hotlist.deepread.DeepReadSectionState
-import app.amber.feature.board.hotlist.deepread.DeepReadSectionStatus
 import app.amber.feature.modelcouncil.CouncilRoom
 import app.amber.feature.modelcouncil.CouncilRoomStatus
 import app.amber.feature.tools.ToolEffectClass
@@ -39,7 +32,6 @@ import kotlin.uuid.Uuid
 /**
  * P8-08 验收测试（Room 持久投影层）：
  * - Council：非终态房间（INTERRUPTED/IDLE）成为候选，终态（FINALIZED）不出现；
- * - DeepRead：未完成且有进度的深度阅读成为候选，完成/过期/删除后消失；
  * - MiniApp 草稿：所属会话存在时成为候选，发送（删除）或会话删除后消失；
  * - dismiss 记录：到期前过滤、到期后恢复。
  */
@@ -136,198 +128,6 @@ class ContinueCandidateRoomSourcesTest {
         assertEquals(1, source.observe().first().size)
 
         db.conversationDao().deleteById(conversationId)
-
-        assertEquals(0, source.observe().first().size)
-    }
-
-    // ------------------------------------------------------------ DeepRead ---
-
-    private suspend fun insertDeepRead(
-        topicId: String,
-        output: DeepReadOutput,
-        expiresAt: Long = nowMs + 86_400_000L,
-        title: String = "话题 $topicId",
-        sourceUrl: String? = null,
-        pinned: Boolean = false,
-    ) {
-        db.hotListDao().upsertDeepRead(
-            DeepReadCacheEntity(
-                topicId = topicId,
-                title = title,
-                outputJson = JsonInstant.encodeToString(DeepReadOutput.serializer(), output),
-                createdAt = nowMs,
-                expiresAt = expiresAt,
-                updatedAt = nowMs,
-                pinned = pinned,
-                sourceUrl = sourceUrl,
-            )
-        )
-    }
-
-    private fun partialOutput(): DeepReadOutput = DeepReadOutput(
-        generationPhase = DeepReadGenerationPhase.IDLE,
-        generationComplete = false,
-        sectionStates = mapOf(
-            DeepReadGenerationStage.OVERVIEW to DeepReadSectionState(DeepReadSectionStatus.READY),
-            DeepReadGenerationStage.NARRATIVE to DeepReadSectionState(),
-        ),
-    )
-
-    @Test
-    fun `incomplete deep read with progress is a FAILED_RESUMABLE candidate`() = runTest {
-        insertDeepRead(topicId = "t1", output = partialOutput())
-        val source = DeepReadContinueSource(hotListDao = db.hotListDao(), context = context) { now }
-
-        val result = source.observe().first()
-
-        assertEquals(1, result.size)
-        val candidate = result.single()
-        assertEquals(ContinueSourceKind.DEEP_READ, candidate.sourceKind)
-        assertEquals(ContinueStatus.FAILED_RESUMABLE, candidate.status)
-        assertEquals(
-            ContinueRoute.DeepRead(
-                topicId = "t1",
-                title = "话题 t1",
-                sourceUrl = null,
-            ),
-            candidate.route,
-        )
-        assertEquals("话题 t1", candidate.title)
-        assertTrue(!candidate.isRunning)
-        assertTrue(!candidate.summary.contains("1/4"))
-    }
-
-    @Test
-    fun `running deep read reports the active stage instead of durable section count`() = runTest {
-        insertDeepRead(
-            topicId = "running",
-            title = "一篇正在生成的文章",
-            output = DeepReadOutput(
-                generationPhase = DeepReadGenerationPhase.WRITING,
-                sectionStates = mapOf(
-                    DeepReadGenerationStage.OVERVIEW to DeepReadSectionState(DeepReadSectionStatus.RUNNING),
-                ),
-            ),
-        )
-        val source = DeepReadContinueSource(
-            hotListDao = db.hotListDao(),
-            context = context,
-            now = { now },
-            observeActiveWorkStates = {
-                flowOf(mapOf("running" to WorkInfo.State.RUNNING))
-            },
-        )
-
-        val candidate = source.observe().first().single()
-
-        assertEquals("一篇正在生成的文章", candidate.title)
-        assertTrue(candidate.isRunning)
-        assertTrue(candidate.summary.contains("overview", ignoreCase = true))
-        assertTrue(!candidate.summary.contains("/4"))
-    }
-
-    @Test
-    fun `stopped deep read with stale writing output is resumable but not running`() = runTest {
-        insertDeepRead(
-            topicId = "stopped",
-            output = DeepReadOutput(
-                generationPhase = DeepReadGenerationPhase.WRITING,
-                sectionStates = mapOf(
-                    DeepReadGenerationStage.NARRATIVE to DeepReadSectionState(DeepReadSectionStatus.RUNNING),
-                ),
-            ),
-        )
-        val source = DeepReadContinueSource(
-            hotListDao = db.hotListDao(),
-            context = context,
-            now = { now },
-            observeActiveWorkStates = { flowOf(emptyMap()) },
-        )
-
-        val candidate = source.observe().first().single()
-
-        assertTrue(!candidate.isRunning)
-        assertEquals(context.getString(app.amber.agent.R.string.session_home_status_resumable), candidate.summary)
-        assertTrue(!candidate.summary.contains("正在", ignoreCase = true))
-    }
-
-    @Test
-    fun `queued or blocked deep read does not masquerade as actively running`() = runTest {
-        insertDeepRead(
-            topicId = "queued",
-            output = DeepReadOutput(generationPhase = DeepReadGenerationPhase.PLANNING),
-        )
-        val source = DeepReadContinueSource(
-            hotListDao = db.hotListDao(),
-            context = context,
-            now = { now },
-            observeActiveWorkStates = {
-                flowOf(mapOf("queued" to WorkInfo.State.ENQUEUED))
-            },
-        )
-
-        val candidate = source.observe().first().single()
-
-        assertTrue(!candidate.isRunning)
-        assertEquals(context.getString(app.amber.agent.R.string.session_home_status_resumable), candidate.summary)
-    }
-
-    @Test
-    fun `deep read Continue preserves its source URL`() = runTest {
-        insertDeepRead(
-            topicId = "with-source",
-            output = partialOutput(),
-            sourceUrl = "https://example.com/article",
-        )
-        val candidate = DeepReadContinueSource(db.hotListDao(), context) { now }
-            .observe()
-            .first()
-            .single()
-
-        assertEquals(
-            ContinueRoute.DeepRead(
-                topicId = "with-source",
-                title = "话题 with-source",
-                sourceUrl = "https://example.com/article",
-            ),
-            candidate.route,
-        )
-    }
-
-    @Test
-    fun `pinned incomplete deep read remains a candidate after expiry`() = runTest {
-        insertDeepRead(
-            topicId = "pinned-expired",
-            output = partialOutput(),
-            expiresAt = nowMs - 1,
-            pinned = true,
-        )
-
-        val candidates = DeepReadContinueSource(hotListDao = db.hotListDao(), context = context) { now }
-            .observe()
-            .first()
-
-        assertEquals(1, candidates.size)
-        assertEquals("pinned-expired", candidates.single().sourceId)
-    }
-
-    @Test
-    fun `complete expired or deleted deep reads never appear`() = runTest {
-        val complete = DeepReadOutput(
-            generationPhase = DeepReadGenerationPhase.COMPLETE,
-            generationComplete = true,
-            sectionStates = DeepReadGenerationStage.entries.associateWith {
-                DeepReadSectionState(DeepReadSectionStatus.READY)
-            },
-        )
-        insertDeepRead(topicId = "done", output = complete)
-        insertDeepRead(topicId = "expired", output = partialOutput(), expiresAt = nowMs - 1)
-        insertDeepRead(topicId = "deleted", output = partialOutput())
-        val source = DeepReadContinueSource(hotListDao = db.hotListDao(), context = context) { now }
-
-        assertEquals(1, source.observe().first().size)
-
-        db.hotListDao().deleteDeepRead("deleted")
 
         assertEquals(0, source.observe().first().size)
     }

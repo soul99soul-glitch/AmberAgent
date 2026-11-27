@@ -15,7 +15,6 @@ import app.amber.agent.AppScope
 import app.amber.core.settings.prefs.NativePathPrefs
 import app.amber.core.sync.core.SyncCryptoNative
 import app.amber.agent.data.model.nativebridge.RegexNativeSwitch
-import app.amber.feature.deepread.nativebridge.ReaderExtractorNative
 import app.amber.feature.ui.components.richtext.nativebridge.MarkdownNativeSwitch
 
 /**
@@ -98,7 +97,6 @@ class NativePathBootstrap(
         HighlightNativeSwitch.config = HighlightConfigImpl()
         MarkdownNativeSwitch.config = MarkdownConfigImpl()
         RegexNativeSwitch.config = RegexConfigImpl()
-        ReaderExtractorNative.config = ReaderExtractorConfigImpl()
         SyncCryptoNative.config = SyncCryptoConfigImpl()
 
         Log.i(TAG, "NativePath adapters installed (kill_switch=$killSwitchCached)")
@@ -280,14 +278,6 @@ class NativePathBootstrap(
             recordPanic(RegexNativeSwitch.COMPONENT_NAME, stage, error)
         override fun onDiff(stage: String, equal: Boolean, jvmSummary: String, nativeSummary: String) =
             recordDiff(RegexNativeSwitch.COMPONENT_NAME, stage, equal, jvmSummary, nativeSummary)
-    }
-
-    private inner class ReaderExtractorConfigImpl : ReaderExtractorNative.Config {
-        override fun enabled(): Boolean = !killSwitchCached
-        override fun onLoadFailure(error: Throwable) =
-            recordLoad(ReaderExtractorNative.COMPONENT_NAME, error)
-        override fun onNativePanic(stage: String, error: Throwable?) =
-            recordPanic(ReaderExtractorNative.COMPONENT_NAME, stage, error)
     }
 
     private inner class SyncCryptoConfigImpl : SyncCryptoNative.Config {

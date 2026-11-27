@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="cloud_detail_configuration">雲端設定</string>
+    <string name="cloud_detail_model_search">模型與搜尋</string>
+    <string name="cloud_detail_rules">行為習慣與規則</string>
+    <string name="cloud_detail_tasks">雲端任務</string>
+    <string name="cloud_detail_submit">交給雲端執行</string>
+    <string name="cloud_detail_task_board">任務看板</string>
+    <string name="cloud_detail_no_tasks">目前沒有任務</string>
+    <string name="cloud_detail_model">模型</string>
+    <string name="cloud_detail_not_configured">未設定</string>
+    <string name="cloud_detail_auth">驗證</string>
+    <string name="cloud_detail_siwc">使用 ChatGPT 登入</string>
+    <string name="cloud_detail_plan">訂閱方案</string>
+    <string name="cloud_detail_search_aggregate">彙整搜尋</string>
+    <string name="cloud_detail_search_fallback">依序搜尋</string>
+    <string name="cloud_detail_search">搜尋</string>
+    <string name="cloud_detail_key_configured">已設定 API 金鑰</string>
+    <string name="cloud_detail_no_rules">目前沒有規則</string>
+    <string name="cloud_detail_archive_rule">封存規則</string>
+    <string name="cloud_detail_revoke_rule">撤銷規則</string>
+    <string name="cloud_detail_task_prompt">要 Amber 做什麼？</string>
+    <string name="cloud_detail_submit_retry">可先查看任務看板，或重試同一請求。</string>
+    <string name="cloud_detail_send">傳送</string>
+    <string name="cloud_detail_task">雲端任務</string>
+    <string name="cloud_detail_cancel_task">取消任務</string>
+    <string name="cloud_detail_close">關閉</string>
+    <string name="cloud_detail_access_denied">目前的配對無法存取此功能。</string>
+    <string name="cloud_detail_stale">配對或請求已變更。請重新整理後再試。</string>
+    <string name="cloud_detail_unavailable">已配對的雲端未傳回這項內容或功能。</string>
+    <string name="cloud_detail_certificate">雲端憑證與目前的配對不符。</string>
+    <string name="cloud_detail_request_failed">雲端請求失敗，請再試一次。</string>
+    <string name="cloud_detail_rule_proposed">待確認</string>
+    <string name="cloud_detail_rule_active">生效中</string>
+    <string name="cloud_detail_rule_archived">已封存</string>
+    <string name="cloud_detail_rule_revoked">已撤銷</string>
+    <string name="cloud_detail_unknown">未知</string>
+    <string name="cloud_detail_queued">排隊中</string>
+    <string name="cloud_detail_running">進行中</string>
+    <string name="cloud_detail_waiting">等你處理</string>
+    <string name="cloud_detail_idle">閒置</string>
+    <string name="cloud_detail_done">已完成</string>
+    <string name="cloud_detail_failed">失敗</string>
+    <string name="cloud_detail_cancelled">已取消</string>
+    <string name="cloud_detail_scheduled">已排定</string>
+    <string name="cloud_detail_ended">已結束</string>
+</resources>

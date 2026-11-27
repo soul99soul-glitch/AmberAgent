@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="amber_multi_device_host_health">主機狀態</string>
+    <string name="mac_gateway_board_title">Mac 任務看板</string>
+    <string name="mac_gateway_empty_board">這台 Mac 暫無任務</string>
+    <string name="mac_gateway_open_board">開啟任務看板</string>
+    <string name="mac_gateway_board_waiting">%1$d 項待你處理</string>
+    <string name="mac_gateway_board_needs_you">待你處理</string>
+    <string name="mac_gateway_board_scheduled">已排定</string>
+    <string name="mac_gateway_board_show_done">展開已完成（%1$d）</string>
+    <string name="mac_gateway_board_hide_done">收合已完成（%1$d）</string>
+    <string name="mac_gateway_board_handle_on_mac">請在 Mac 上處理</string>
+    <string name="mac_gateway_schedules_title">Mac 排程</string>
+    <string name="mac_gateway_empty_schedules">這台 Mac 暫無排程</string>
+    <string name="mac_gateway_new_schedule">新增排程</string>
+    <string name="mac_gateway_schedule_create">建立</string>
+    <string name="mac_gateway_schedule_prompt">到時間後傳給模型的內容</string>
+    <string name="mac_gateway_schedule_rule">執行頻率</string>
+    <string name="mac_gateway_schedule_daily">每天</string>
+    <string name="mac_gateway_schedule_weekdays">平日</string>
+    <string name="mac_gateway_schedule_weekly">每週</string>
+    <string name="mac_gateway_schedule_interval">按間隔</string>
+    <string name="mac_gateway_schedule_interval_minutes">%1$d 分鐘</string>
+    <string name="mac_gateway_schedule_time">Mac 時間 · %1$s</string>
+    <string name="mac_gateway_schedule_policy">排程依 Mac 時區執行。新任務需要核准工具操作，核准規則在 Mac 上管理。</string>
+    <string name="mac_gateway_schedule_running">正在 Mac 上執行</string>
+    <string name="mac_gateway_schedules_paused">這台 Mac 已暫停所有排程</string>
+    <string name="mac_gateway_schedule_next">下次執行 · %1$s</string>
+    <string name="mac_gateway_schedule_last">上次執行 · %1$s</string>
+    <string name="mac_gateway_schedule_auto_approval">使用這台 Mac 上設定的高風險自動核准規則</string>
+    <string name="mac_gateway_schedule_enable">啟用</string>
+    <string name="mac_gateway_schedule_disable">停用</string>
+    <string name="mac_gateway_run_schedule">立即執行</string>
+    <string name="mac_gateway_run_schedule_title">立即執行「%1$s」？</string>
+    <string name="mac_gateway_run_schedule_message">將在已配對的 Mac 上啟動這項任務。</string>
+    <string name="mac_gateway_run_schedule_auto_approval">此次執行會使用已配對 Mac 上設定的高風險自動核准規則。</string>
+    <string name="mac_gateway_schedule_created">已在 Mac 上建立排程</string>
+    <string name="mac_gateway_schedule_started">已在 Mac 上開始執行</string>
+    <string name="mac_gateway_tasks_unsupported">目前的 Mac 閘道未提供此功能，請更新 Mac 上的 Amber。</string>
+    <string name="mac_gateway_tasks_unavailable">暫時無法讀取 Mac 任務</string>
+    <string name="mac_gateway_task_changed">任務已變更，請重新整理後再試。</string>
+    <string name="mac_gateway_schedule_unconfirmed">Mac 未確認請求，請重新整理並核對操作是否已生效。</string>
+</resources>

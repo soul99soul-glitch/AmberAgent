@@ -860,7 +860,6 @@ class ModelMenuInteractionTest {
                             conversationFlow = conversationFlow,
                             bigScreen = false,
                             onBack = onBack,
-                            currentChatModel = null,
                             generating = false,
                             processingStatus = null,
                             recapEligible = false,
@@ -868,8 +867,6 @@ class ModelMenuInteractionTest {
                             shelfOpen = false,
                             activityOpen = false,
                             otherActivityCount = 0,
-                            modelMenuOpen = menuOpen,
-                            onToggleModelMenu = { menuOpen = !menuOpen },
                             onIslandOpenRecap = {},
                             onIslandJumpToLive = {},
                             onIslandStop = {},
@@ -878,6 +875,7 @@ class ModelMenuInteractionTest {
                         )
                     }
                     Box(Modifier.weight(1f).fillMaxWidth())
+                    ChatComposerModelButton(model = null) { menuOpen = true }
                 }
                 ChatModelMenuOverlay(
                     open = menuOpen,
@@ -957,7 +955,6 @@ class ModelMenuInteractionTest {
                                     conversationFlow = conversationFlow,
                                     bigScreen = true,
                                     onBack = onBack,
-                                    currentChatModel = null,
                                     generating = false,
                                     processingStatus = null,
                                     recapEligible = false,
@@ -965,8 +962,6 @@ class ModelMenuInteractionTest {
                                     shelfOpen = false,
                                     activityOpen = false,
                                     otherActivityCount = 0,
-                                    modelMenuOpen = menuOpen,
-                                    onToggleModelMenu = { menuOpen = !menuOpen },
                                     onIslandOpenRecap = {},
                                     onIslandJumpToLive = {},
                                     onIslandStop = {},
@@ -1014,9 +1009,8 @@ class ModelMenuInteractionTest {
         compose.waitForIdle()
         compose.onNodeWithTag("top-model-menu-panel").assertDoesNotExist()
 
-        // Real production trigger: the header model row toggles the route-owned open state, and
-        // the app-level host must render the panel/scrim for this closed -> open transition.
-        compose.onNodeWithTag("chat-header-model-menu").performClick()
+        // Drive the state change through a real model button and verify host publication.
+        compose.onNodeWithTag("chat-composer-model-picker").performClick()
         compose.waitForIdle()
         compose.onNodeWithTag("top-model-menu-scrim").assertIsDisplayed()
         compose.onNodeWithTag("top-model-menu-panel").assertIsDisplayed()
@@ -1026,7 +1020,7 @@ class ModelMenuInteractionTest {
         compose.onRoot().performTouchInput { click(headerBack) }
         settleMenuAnimation()
         assertEquals(1, closed)
-        assertEquals("opening from the header must not navigate", 0, navBack)
+        assertEquals("opening the menu must not navigate", 0, navBack)
 
         val headerBackAfterDismiss = compose.onNodeWithTag("chat-header-back")
             .fetchSemanticsNode().boundsInRoot.center

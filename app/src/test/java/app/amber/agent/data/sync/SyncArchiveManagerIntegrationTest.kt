@@ -63,8 +63,6 @@ import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.core.utils.JsonInstant
 import app.amber.agent.data.workspace.ArtifactRepository
 import app.amber.feature.workspace.WorkspaceManager
-import app.amber.feature.novelworkspace.NovelWorkspaceProjectRepository
-import app.amber.feature.novel.workspace.NovelWorkspaceRestoreBridge
 import app.amber.feature.webmount.oauth.WebMountOAuthTokenStore
 import java.io.File
 import java.io.FileInputStream
@@ -108,6 +106,7 @@ import kotlin.uuid.Uuid
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = Application::class)
 class SyncArchiveManagerIntegrationTest {
+    private val legacyNovelWorkspaceRoot = "amberagent/novel-workspace"
     private lateinit var context: Context
     private lateinit var database: AppDatabase
     private lateinit var appScope: AppScope
@@ -398,7 +397,7 @@ class SyncArchiveManagerIntegrationTest {
         )
         val payload = readArchivePayload(archive, "test-passphrase")
         assertEquals(
-            archivedNovel.keys.map { "files/${NovelWorkspaceProjectRepository.RELATIVE_ROOT}/$it" }.toSet() +
+            archivedNovel.keys.map { "files/${legacyNovelWorkspaceRoot}/$it" }.toSet() +
                 "files/${FileFolders.UPLOAD}/attachment.txt",
             payload.keys.filter { it.startsWith("files/") }.toSet(),
         )
@@ -429,7 +428,7 @@ class SyncArchiveManagerIntegrationTest {
         )
         val payload = readArchivePayload(archive, "test-passphrase")
         assertTrue(payloadManifest(payload).datasets.any { it.id == "novel-workspace" })
-        assertFalse(payload.keys.any { it.startsWith("files/${NovelWorkspaceProjectRepository.RELATIVE_ROOT}/") })
+        assertFalse(payload.keys.any { it.startsWith("files/${legacyNovelWorkspaceRoot}/") })
         val sibling = File(context.filesDir, "$AMBER_SIBLING_ROOT/keep.txt").apply {
             parentFile!!.mkdirs()
             writeText("keep sibling")
@@ -450,7 +449,7 @@ class SyncArchiveManagerIntegrationTest {
         )
         val payload = readArchivePayload(archive, "test-passphrase")
         assertFalse(payloadManifest(payload).datasets.any { it.id == "novel-workspace" })
-        assertFalse(payload.keys.any { it.startsWith("files/${NovelWorkspaceProjectRepository.RELATIVE_ROOT}/") })
+        assertFalse(payload.keys.any { it.startsWith("files/${legacyNovelWorkspaceRoot}/") })
         val localNovel = mapOf("local-project/.amber/sessions.json" to "new local conversation".toByteArray())
         novelRoot().deleteRecursively()
         writeFiles(novelRoot(), localNovel)
@@ -490,7 +489,7 @@ class SyncArchiveManagerIntegrationTest {
         // Retaining the native entries proves that marker absence controls adoption,
         // rather than merely testing an archive with no novel bytes to restore.
         assertTrue(readArchivePayload(legacyArchive, "test-passphrase").keys.any {
-            it.startsWith("files/${NovelWorkspaceProjectRepository.RELATIVE_ROOT}/")
+            it.startsWith("files/${legacyNovelWorkspaceRoot}/")
         })
         val localNovel = mapOf("local-project/.amber/settings.json" to "local model selection".toByteArray())
         novelRoot().deleteRecursively()
@@ -508,8 +507,8 @@ class SyncArchiveManagerIntegrationTest {
         )
         val previousNovel = nativeNovelFiles()
         val journalRoot = File(context.cacheDir, "sync-restore-file-journal").apply { mkdirs() }
-        writeFiles(File(journalRoot, "backup/${NovelWorkspaceProjectRepository.RELATIVE_ROOT}"), previousNovel)
-        File(journalRoot, "roots").writeText(NovelWorkspaceProjectRepository.RELATIVE_ROOT)
+        writeFiles(File(journalRoot, "backup/${legacyNovelWorkspaceRoot}"), previousNovel)
+        File(journalRoot, "roots").writeText(legacyNovelWorkspaceRoot)
         File(journalRoot, "token").writeText("interrupted-before-database-commit")
         File(journalRoot, "state").writeText("files_replaced")
         writeFiles(novelRoot(), mapOf("partial-project/project.md" to "uncommitted import".toByteArray()))
@@ -532,25 +531,19 @@ class SyncArchiveManagerIntegrationTest {
         database.managedFileDao().insert(managedFile("old.txt", previousUpload.getValue("old.txt").size.toLong()))
         val journalRoot = File(context.cacheDir, "sync-restore-file-journal").apply { mkdirs() }
         writeFiles(File(journalRoot, "backup/${FileFolders.UPLOAD}"), previousUpload)
-        writeFiles(File(journalRoot, "backup/${NovelWorkspaceProjectRepository.RELATIVE_ROOT}"), previousNovel)
-        File(journalRoot, "roots").writeText("${FileFolders.UPLOAD}\n${NovelWorkspaceProjectRepository.RELATIVE_ROOT}")
+        writeFiles(File(journalRoot, "backup/${legacyNovelWorkspaceRoot}"), previousNovel)
+        File(journalRoot, "roots").writeText("${FileFolders.UPLOAD}\n${legacyNovelWorkspaceRoot}")
         File(journalRoot, "token").writeText("uncommitted-startup-import")
         File(journalRoot, "state").writeText("files_replaced")
         writeFiles(File(context.filesDir, FileFolders.UPLOAD), mapOf("partial.txt" to "partial import".toByteArray()))
         writeFiles(novelRoot(), mapOf("partial-project/project.md" to "partial novel".toByteArray()))
-        val repository = NovelWorkspaceProjectRepository(novelRoot())
-        var pausedBackgroundWork = 0
         assertTrue(SyncArchiveManager.hasInterruptedFileRestore(context))
 
-        NovelWorkspaceRestoreBridge(restoreWriteGate, novelRoot()) { pausedBackgroundWork++ }.use {
-            manager.recoverInterruptedRestore()
-        }
+        manager.recoverInterruptedRestore()
 
         assertFiles(File(context.filesDir, FileFolders.UPLOAD), previousUpload)
         assertFiles(novelRoot(), previousNovel)
         assertEquals(listOf("${FileFolders.UPLOAD}/old.txt"), database.managedFileDao().listByFolder(FileFolders.UPLOAD).first().map { it.relativePath })
-        assertTrue(repository.allowsAutomaticMigration())
-        assertEquals(1, pausedBackgroundWork)
         assertFalse(restoreWriteGate.isRestoring())
         assertFalse(SyncArchiveManager.hasInterruptedFileRestore(context))
     }
@@ -588,60 +581,50 @@ class SyncArchiveManagerIntegrationTest {
     }
 
     @Test
-    fun startupRecoveryAdoptsCommittedNativeNovelSnapshotThroughExistingBridge() = runBlocking {
+    fun startupRecoveryKeepsCommittedNovelFiles() = runBlocking {
         val importedNovel = nativeNovelFiles()
         writeFiles(novelRoot(), importedNovel)
         val journalRoot = File(context.cacheDir, "sync-restore-file-journal").apply { mkdirs() }
-        writeFiles(File(journalRoot, "backup/${NovelWorkspaceProjectRepository.RELATIVE_ROOT}"), mapOf("old-project/project.md" to "old novel".toByteArray()))
-        File(journalRoot, "roots").writeText(NovelWorkspaceProjectRepository.RELATIVE_ROOT)
+        writeFiles(File(journalRoot, "backup/${legacyNovelWorkspaceRoot}"), mapOf("old-project/project.md" to "old novel".toByteArray()))
+        File(journalRoot, "roots").writeText(legacyNovelWorkspaceRoot)
         File(journalRoot, "token").writeText("committed-native-startup-import")
         File(journalRoot, "state").writeText("data_committed")
         writeCommittedRestoreMarker("committed-native-startup-import")
-        val repository = NovelWorkspaceProjectRepository(novelRoot())
 
-        NovelWorkspaceRestoreBridge(restoreWriteGate, novelRoot()) {}.use {
-            manager.recoverInterruptedRestore()
-        }
+        manager.recoverInterruptedRestore()
 
-        assertFalse(repository.allowsAutomaticMigration())
-        val marker = File(novelRoot(), ".native-restored")
-        assertTrue(marker.isFile)
-        assertFiles(novelRoot(), importedNovel + (".native-restored" to marker.readBytes()))
+        assertFiles(novelRoot(), importedNovel)
         assertFalse(journalRoot.exists())
     }
 
     @Test
-    fun nativeJournalRollbackBeforeConfigurationRestorePreservesAutomaticMigrationPolicy() = runBlocking {
+    fun nativeJournalRollbackBeforeConfigurationRestorePreservesNovelFiles() = runBlocking {
         val archive = manager.createArchive(
             SyncExportRequest(mode = SyncMode.STANDARD, passphrase = "test-passphrase"),
         )
         val previousNovel = nativeNovelFiles()
         val journalRoot = File(context.cacheDir, "sync-restore-file-journal").apply { mkdirs() }
-        writeFiles(File(journalRoot, "backup/${NovelWorkspaceProjectRepository.RELATIVE_ROOT}"), previousNovel)
-        File(journalRoot, "roots").writeText(NovelWorkspaceProjectRepository.RELATIVE_ROOT)
+        writeFiles(File(journalRoot, "backup/${legacyNovelWorkspaceRoot}"), previousNovel)
+        File(journalRoot, "roots").writeText(legacyNovelWorkspaceRoot)
         File(journalRoot, "token").writeText("uncommitted-native-import")
         File(journalRoot, "state").writeText("files_replaced")
         writeFiles(novelRoot(), mapOf("partial-project/project.md" to "uncommitted import".toByteArray()))
-        val repository = NovelWorkspaceProjectRepository(novelRoot())
 
-        NovelWorkspaceRestoreBridge(restoreWriteGate, novelRoot()) {}.use {
-            manager.restoreArchive(archive, restoreRequest(scope = RestoreScope.CONFIG_ONLY))
-        }
+        manager.restoreArchive(archive, restoreRequest(scope = RestoreScope.CONFIG_ONLY))
 
-        assertTrue(repository.allowsAutomaticMigration())
         assertFiles(novelRoot(), previousNovel)
         assertFalse(journalRoot.exists())
     }
 
     @Test
-    fun committedNativeJournalRecoveryBeforeConfigurationRestoreRecordsSnapshotAdoption() = runBlocking {
+    fun committedNativeJournalRecoveryBeforeConfigurationRestorePreservesNovelFiles() = runBlocking {
         val archive = manager.createArchive(
             SyncExportRequest(mode = SyncMode.STANDARD, passphrase = "test-passphrase"),
         )
         val importedNovel = nativeNovelFiles()
         writeFiles(novelRoot(), importedNovel)
         val journalRoot = File(context.cacheDir, "sync-restore-file-journal").apply { mkdirs() }
-        File(journalRoot, "roots").writeText(NovelWorkspaceProjectRepository.RELATIVE_ROOT)
+        File(journalRoot, "roots").writeText(legacyNovelWorkspaceRoot)
         File(journalRoot, "token").writeText("committed-native-import")
         File(journalRoot, "state").writeText("data_committed")
         database.openHelper.writableDatabase.execSQL(
@@ -652,16 +635,10 @@ class SyncArchiveManagerIntegrationTest {
             "INSERT OR REPLACE INTO amber_sync_restore_marker(id, token) VALUES (1, ?)",
             arrayOf("committed-native-import"),
         )
-        val repository = NovelWorkspaceProjectRepository(novelRoot())
 
-        NovelWorkspaceRestoreBridge(restoreWriteGate, novelRoot()) {}.use {
-            manager.restoreArchive(archive, restoreRequest(scope = RestoreScope.CONFIG_ONLY))
-        }
+        manager.restoreArchive(archive, restoreRequest(scope = RestoreScope.CONFIG_ONLY))
 
-        assertFalse(repository.allowsAutomaticMigration())
-        val marker = File(novelRoot(), ".native-restored")
-        assertTrue(marker.isFile)
-        assertFiles(novelRoot(), importedNovel + (".native-restored" to marker.readBytes()))
+        assertFiles(novelRoot(), importedNovel)
         assertFalse(journalRoot.exists())
     }
 
@@ -693,15 +670,11 @@ class SyncArchiveManagerIntegrationTest {
             "INSERT OR REPLACE INTO amber_sync_restore_marker(id, token) VALUES (1, ?)",
             arrayOf("previous-upload-commit"),
         )
-        val repository = NovelWorkspaceProjectRepository(novelRoot())
 
-        val error = NovelWorkspaceRestoreBridge(restoreWriteGate, novelRoot()) {}.use {
-            runCatching { manager.restoreArchive(invalidArchive, restoreRequest()) }.exceptionOrNull()
-        }
+        val error = runCatching { manager.restoreArchive(invalidArchive, restoreRequest()) }.exceptionOrNull()
 
         assertTrue(error is kotlinx.serialization.SerializationException)
         assertFiles(novelRoot(), localNovel)
-        assertTrue(repository.allowsAutomaticMigration())
         assertEquals("Previously committed upload", previousUpload.readText())
         assertFalse(journalRoot.exists())
     }
@@ -717,7 +690,7 @@ class SyncArchiveManagerIntegrationTest {
             val journalRoot = File(context.cacheDir, "sync-restore-file-journal").apply { mkdirs() }
             writeFiles(File(journalRoot, "backup/${FileFolders.UPLOAD}"), previousUpload)
             File(journalRoot, "roots").writeText(
-                "${FileFolders.UPLOAD}\n${NovelWorkspaceProjectRepository.RELATIVE_ROOT}",
+                "${FileFolders.UPLOAD}\n${legacyNovelWorkspaceRoot}",
             )
             File(journalRoot, "token").writeText("interrupted-during-root-backup")
             if (state != null) File(journalRoot, "state").writeText(state)
@@ -997,7 +970,7 @@ class SyncArchiveManagerIntegrationTest {
         assertTrue(journalRoot.exists())
         assertTrue(archivedUpload.exists())
         assertFiles(novelRoot(), archivedNovel)
-        assertFiles(File(journalRoot, "backup/${NovelWorkspaceProjectRepository.RELATIVE_ROOT}"), localNovel)
+        assertFiles(File(journalRoot, "backup/${legacyNovelWorkspaceRoot}"), localNovel)
         val importedRows = database.managedFileDao().listByFolder(FileFolders.UPLOAD).first()
         assertEquals(listOf("upload/partial-commit.txt"), importedRows.map { it.relativePath })
 
@@ -1188,7 +1161,7 @@ class SyncArchiveManagerIntegrationTest {
         preserveGenMedia = false,
     )
 
-    private fun novelRoot(): File = NovelWorkspaceProjectRepository.defaultRoot(context.filesDir)
+    private fun novelRoot(): File = File(context.filesDir, legacyNovelWorkspaceRoot)
 
     private fun nativeNovelFiles(): Map<String, ByteArray> = mapOf(
         "test-project/manifest.yaml" to "format: amber.novel.workspace".toByteArray(),
@@ -1226,7 +1199,7 @@ class SyncArchiveManagerIntegrationTest {
         FileFolders.SKILLS,
         FileFolders.IMAGES,
         FileFolders.CHAT_IMAGES,
-        NovelWorkspaceProjectRepository.RELATIVE_ROOT,
+        legacyNovelWorkspaceRoot,
         AMBER_SIBLING_ROOT,
         NOVEL_SIBLING_ROOT,
         "amberagent/workspace-mirror",

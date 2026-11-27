@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="agent_persona_avatar_restore">還原預設狐狸</string>
+    <string name="agent_persona_avatar_importing">正在處理圖片…</string>
+    <string name="agent_persona_avatar_import_error">無法讀取這張圖片，請換一張。</string>
+    <string name="agent_persona_avatar_save_error">頭像儲存失敗，請重試。</string>
+</resources>

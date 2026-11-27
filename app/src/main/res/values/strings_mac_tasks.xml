@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="amber_multi_device_host_health">Host status</string>
+    <string name="mac_gateway_board_title">Mac task board</string>
+    <string name="mac_gateway_empty_board">No tasks on this Mac</string>
+    <string name="mac_gateway_open_board">Open task board</string>
+    <string name="mac_gateway_board_waiting">%1$d awaiting your attention</string>
+    <string name="mac_gateway_board_needs_you">Needs your attention</string>
+    <string name="mac_gateway_board_scheduled">Scheduled</string>
+    <string name="mac_gateway_board_show_done">Show completed (%1$d)</string>
+    <string name="mac_gateway_board_hide_done">Hide completed (%1$d)</string>
+    <string name="mac_gateway_board_handle_on_mac">Review this task on the Mac</string>
+    <string name="mac_gateway_schedules_title">Mac schedules</string>
+    <string name="mac_gateway_empty_schedules">No schedules on this Mac</string>
+    <string name="mac_gateway_new_schedule">New schedule</string>
+    <string name="mac_gateway_schedule_create">Create</string>
+    <string name="mac_gateway_schedule_prompt">Prompt to run</string>
+    <string name="mac_gateway_schedule_rule">Frequency</string>
+    <string name="mac_gateway_schedule_daily">Daily</string>
+    <string name="mac_gateway_schedule_weekdays">Weekdays</string>
+    <string name="mac_gateway_schedule_weekly">Weekly</string>
+    <string name="mac_gateway_schedule_interval">Interval</string>
+    <string name="mac_gateway_schedule_interval_minutes">%1$d min</string>
+    <string name="mac_gateway_schedule_time">Mac time · %1$s</string>
+    <string name="mac_gateway_schedule_policy">Schedules use the time zone on the Mac. New tasks require tool approval. Approval rules are managed on the Mac.</string>
+    <string name="mac_gateway_schedule_running">Running on Mac</string>
+    <string name="mac_gateway_schedules_paused">All schedules are paused on this Mac</string>
+    <string name="mac_gateway_schedule_next">Next run · %1$s</string>
+    <string name="mac_gateway_schedule_last">Last run · %1$s</string>
+    <string name="mac_gateway_schedule_auto_approval">Uses the high-risk auto-approval policy set on this Mac</string>
+    <string name="mac_gateway_schedule_enable">Enable</string>
+    <string name="mac_gateway_schedule_disable">Disable</string>
+    <string name="mac_gateway_run_schedule">Run now</string>
+    <string name="mac_gateway_run_schedule_title">Run %1$s now?</string>
+    <string name="mac_gateway_run_schedule_message">This will start a run on the paired Mac.</string>
+    <string name="mac_gateway_run_schedule_auto_approval">This run will use the high-risk auto-approval policy set on the paired Mac.</string>
+    <string name="mac_gateway_schedule_created">Schedule created on Mac</string>
+    <string name="mac_gateway_schedule_started">Started on Mac</string>
+    <string name="mac_gateway_tasks_unsupported">This Mac gateway does not offer this feature. Update Amber on the Mac.</string>
+    <string name="mac_gateway_tasks_unavailable">Mac task data is currently unavailable</string>
+    <string name="mac_gateway_task_changed">The task has changed. Refresh and try again.</string>
+    <string name="mac_gateway_schedule_unconfirmed">Mac did not confirm the request. Refresh to check whether it took effect.</string>
+</resources>

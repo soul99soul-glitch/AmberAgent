@@ -144,7 +144,7 @@ private fun rememberReasoningState(
 
     LaunchedEffect(loading, messageLoading) {
         if (loading) {
-            if (!state.expandState.expanded && settings.displaySetting.showThinkingContent)
+            if (!state.expandState.expanded && settings.displaySetting.effectiveShowThinkingContent())
                 state.expandState = ReasoningCardState.Preview
         } else {
             if (state.expandState.expanded) {

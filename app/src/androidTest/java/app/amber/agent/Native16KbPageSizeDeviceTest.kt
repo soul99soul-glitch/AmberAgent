@@ -42,7 +42,7 @@ class Native16KbPageSizeDeviceTest {
     @Test
     fun allRustLibrariesLoadAndBothParserLibrariesExecute() = runBlocking {
         listOf("highlight_parser", "office_parsers", "markdown_parser", "markdown_preprocess",
-            "html_diff_normalizer", "regex_transformer", "reader_extractor", "sync_crypto")
+            "html_diff_normalizer", "regex_transformer", "sync_crypto")
             .forEach { System.loadLibrary(it) }
         assertTrue(MarkdownParserNative.renderHtml("**Amber16KB**").orEmpty().contains("<strong>Amber16KB</strong>"))
 

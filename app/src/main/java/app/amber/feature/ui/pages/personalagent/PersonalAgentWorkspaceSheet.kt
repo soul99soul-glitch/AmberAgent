@@ -25,6 +25,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ModalBottomSheetProperties
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -33,6 +34,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Alignment
@@ -68,6 +70,7 @@ import com.composables.icons.lucide.Search
 import com.composables.icons.lucide.Settings
 import com.composables.icons.lucide.Smartphone
 import com.composables.icons.lucide.Sparkles
+import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import kotlin.uuid.Uuid
 
@@ -89,7 +92,7 @@ fun PersonalAgentWorkspaceSheet(
     onOpenAgentSoul: () -> Unit,
     onNewTopic: () -> Unit,
     onOpenPhoneAutomation: () -> Unit,
-    onOpenTodayBoard: () -> Unit,
+    onOpenTasks: () -> Unit,
     onOpenProactiveCenter: () -> Unit,
     onOpenPairedGateway: () -> Unit,
     onOpenAllSessions: () -> Unit,
@@ -99,7 +102,23 @@ fun PersonalAgentWorkspaceSheet(
     val tokens = LocalAmberTokens.current
     val conversationRepository: ConversationRepository = koinInject()
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    var closing by remember { mutableStateOf(false) }
     var recentConversations by remember { mutableStateOf<List<Conversation>>(emptyList()) }
+
+    fun closeThen(action: () -> Unit) {
+        if (closing) return
+        closing = true
+        scope.launch {
+            try {
+                sheetState.hide()
+                onDismiss()
+                action()
+            } finally {
+                closing = false
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         recentConversations = runCatching {
@@ -108,12 +127,17 @@ fun PersonalAgentWorkspaceSheet(
     }
 
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!closing) onDismiss() },
         sheetState = sheetState,
+        sheetGesturesEnabled = !closing,
         containerColor = tokens.bg,
         contentColor = tokens.ink,
         scrimColor = Color.Black.copy(alpha = if (tokens.isDark) 0.56f else 0.34f),
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        properties = ModalBottomSheetProperties(
+            shouldDismissOnBackPress = !closing,
+            shouldDismissOnClickOutside = !closing,
+        ),
     ) {
         Column(
             modifier = Modifier
@@ -132,10 +156,7 @@ fun PersonalAgentWorkspaceSheet(
                 Row(
                     modifier = Modifier
                         .clip(CircleShape)
-                        .clickable {
-                            onDismiss()
-                            onOpenSearch()
-                        }
+                        .clickable { closeThen(onOpenSearch) }
                         .padding(horizontal = 8.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(5.dp),
@@ -171,10 +192,7 @@ fun PersonalAgentWorkspaceSheet(
                 Row(
                     modifier = Modifier
                         .clip(CircleShape)
-                        .clickable {
-                            onDismiss()
-                            onOpenSettings()
-                        }
+                        .clickable { closeThen(onOpenSettings) }
                         .padding(horizontal = 8.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -208,14 +226,8 @@ fun PersonalAgentWorkspaceSheet(
                 AgentPrimaryCard(
                     soulDisplayName = soulDisplayName,
                     pairedGatewayName = pairedGatewayName,
-                    onOpenAgentSoul = {
-                        onDismiss()
-                        onOpenAgentSoul()
-                    },
-                    onNewTopic = {
-                        onDismiss()
-                        onNewTopic()
-                    },
+                    onOpenAgentSoul = { closeThen(onOpenAgentSoul) },
+                    onNewTopic = { closeThen(onNewTopic) },
                 )
 
                 // 2. Common Features & Settings
@@ -239,20 +251,14 @@ fun PersonalAgentWorkspaceSheet(
                                 icon = Lucide.Smartphone,
                                 title = stringResource(R.string.personal_agent_drawer_phone_automation),
                                 subtitle = stringResource(R.string.personal_agent_drawer_phone_automation_desc),
-                                onClick = {
-                                    onDismiss()
-                                    onOpenPhoneAutomation()
-                                },
+                                onClick = { closeThen(onOpenPhoneAutomation) },
                             )
                             DrawerHairline()
                             DrawerFeatureRow(
                                 icon = Lucide.LayoutDashboard,
-                                title = stringResource(R.string.personal_agent_menu_today_board),
-                                subtitle = stringResource(R.string.personal_agent_drawer_today_board_desc),
-                                onClick = {
-                                    onDismiss()
-                                    onOpenTodayBoard()
-                                },
+                                title = stringResource(R.string.personal_agent_tab_tasks),
+                                subtitle = stringResource(R.string.setting_agent_runtime_tasks_scope_desc),
+                                onClick = { closeThen(onOpenTasks) },
                             )
                             DrawerHairline()
                             DrawerFeatureRow(
@@ -265,10 +271,7 @@ fun PersonalAgentWorkspaceSheet(
                                 },
                                 badgeCount = proactiveBadgeCount,
                                 modifier = Modifier.testTag("personal-agent-menu-proactive-center"),
-                                onClick = {
-                                    onDismiss()
-                                    onOpenProactiveCenter()
-                                },
+                                onClick = { closeThen(onOpenProactiveCenter) },
                             )
                             DrawerHairline()
                             DrawerFeatureRow(
@@ -282,10 +285,7 @@ fun PersonalAgentWorkspaceSheet(
                                 } else {
                                     stringResource(R.string.personal_agent_menu_paired_gateway_unpaired)
                                 },
-                                onClick = {
-                                    onDismiss()
-                                    onOpenPairedGateway()
-                                },
+                                onClick = { closeThen(onOpenPairedGateway) },
                             )
                             DrawerHairline()
                             DrawerFeatureRow(
@@ -293,10 +293,7 @@ fun PersonalAgentWorkspaceSheet(
                                 title = stringResource(R.string.personal_agent_drawer_all_sessions),
                                 subtitle = stringResource(R.string.personal_agent_drawer_all_sessions_desc),
                                 modifier = Modifier.testTag("personal-agent-sessions"),
-                                onClick = {
-                                    onDismiss()
-                                    onOpenAllSessions()
-                                },
+                                onClick = { closeThen(onOpenAllSessions) },
                             )
                             if (hasMessages) {
                                 DrawerHairline()
@@ -304,10 +301,7 @@ fun PersonalAgentWorkspaceSheet(
                                     icon = Lucide.Layers,
                                     title = stringResource(R.string.personal_agent_drawer_shelf),
                                     subtitle = stringResource(R.string.personal_agent_drawer_shelf_desc),
-                                    onClick = {
-                                        onDismiss()
-                                        onToggleShelf()
-                                    },
+                                    onClick = { closeThen(onToggleShelf) },
                                 )
                             }
                         }
@@ -332,10 +326,7 @@ fun PersonalAgentWorkspaceSheet(
                         Row(
                             modifier = Modifier
                                 .clip(CircleShape)
-                                .clickable {
-                                    onDismiss()
-                                    onOpenAllSessions()
-                                }
+                                .clickable { closeThen(onOpenAllSessions) }
                                 .padding(horizontal = 4.dp, vertical = 2.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -380,9 +371,8 @@ fun PersonalAgentWorkspaceSheet(
                                             .fillMaxWidth()
                                             .heightIn(min = 48.dp)
                                             .clickable {
-                                                onDismiss()
-                                                if (!isCurrent) {
-                                                    onSelectConversation(summary.id)
+                                                closeThen {
+                                                    if (!isCurrent) onSelectConversation(summary.id)
                                                 }
                                             }
                                             .padding(horizontal = 14.dp, vertical = 11.dp),

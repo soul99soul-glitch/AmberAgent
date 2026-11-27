@@ -1,5 +1,21 @@
 package app.amber.feature.ui.components.ai
 
+import android.content.ActivityNotFoundException
+import android.net.Uri
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.updateTransition
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -22,7 +38,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.ModalBottomSheetProperties
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -31,27 +50,48 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.hideFromAccessibility
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.amber.agent.R
 import app.amber.feature.macgateway.MacGatewayRepository
+import app.amber.feature.prompts.AgentPersonaAvatarStore
 import app.amber.feature.prompts.AgentSoulSnapshot
 import app.amber.feature.prompts.AgentSoulState
 import app.amber.feature.prompts.AgentSoulStore
+import app.amber.feature.ui.components.ds.AmberFeedback
+import app.amber.feature.ui.pages.personalagent.AmberPersonaMedallion
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
+import com.composables.icons.lucide.Image
+import com.composables.icons.lucide.Lucide
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
 /**
@@ -91,7 +131,7 @@ fun AgentSoulOverviewCard(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            PersonaMonogramBadge(name = soulState.displayName, sizeDp = 38)
+            AmberPersonaMedallion(diameter = 38.dp)
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(3.dp),
@@ -136,14 +176,58 @@ fun AgentSoulSheet(
     macGatewayRepository: MacGatewayRepository = koinInject(),
 ) {
     val soulState by agentSoulStore.state.collectAsStateWithLifecycle()
+    val avatarStore: AgentPersonaAvatarStore = koinInject()
+    val avatar by avatarStore.avatar.collectAsStateWithLifecycle()
     val tokens = LocalAmberTokens.current
     val type = LocalAmberType.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    var editing by remember { mutableStateOf(false) }
-    var draftName by remember(soulState.displayName, editing) { mutableStateOf(soulState.displayName) }
-    var draftTagline by remember(soulState.tagline, editing) { mutableStateOf(soulState.tagline) }
-    var draftSoul by remember(soulState.soulMarkdown, editing) { mutableStateOf(soulState.soulMarkdown) }
+    var editing by rememberSaveable { mutableStateOf(false) }
+    var draftName by rememberSaveable { mutableStateOf("") }
+    var draftTagline by rememberSaveable { mutableStateOf("") }
+    var draftSoul by rememberSaveable { mutableStateOf("") }
+    var textEdited by rememberSaveable { mutableStateOf(false) }
+    var draftAvatar by remember { mutableStateOf<ByteArray?>(null) }
+    var avatarEdited by remember { mutableStateOf(false) }
+    var pickingPhoto by remember { mutableStateOf(false) }
+    var pendingPhoto by remember { mutableStateOf<Uri?>(null) }
+    var photoMessage by remember { mutableIntStateOf(0) }
+    var saving by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val shownAvatar = if (editing && avatarEdited) draftAvatar else avatar
+
+    fun beginEditing() {
+        if (editing) return
+        val current = agentSoulStore.state.value
+        draftName = current.displayName
+        draftTagline = current.tagline
+        draftSoul = current.soulMarkdown
+        textEdited = false
+        editing = true
+    }
+
+    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        pickingPhoto = false
+        pendingPhoto = uri
+    }
+
+    LaunchedEffect(pendingPhoto) {
+        val uri = pendingPhoto ?: return@LaunchedEffect
+        photoMessage = 0
+        try {
+            val image = avatarStore.importPhoto(uri)
+            if (pendingPhoto == uri) {
+                beginEditing()
+                draftAvatar = image
+                avatarEdited = true
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (_: Exception) {
+            if (pendingPhoto == uri) photoMessage = R.string.agent_persona_avatar_import_error
+        }
+        if (pendingPhoto == uri) pendingPhoto = null
+    }
 
     LaunchedEffect(Unit) {
         macGatewayRepository.syncSoulWithCloud()
@@ -152,20 +236,43 @@ fun AgentSoulSheet(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
+        sheetGesturesEnabled = !saving,
         containerColor = tokens.bg,
         contentColor = tokens.ink,
+        properties = ModalBottomSheetProperties(
+            shouldDismissOnBackPress = !editing,
+            shouldDismissOnClickOutside = !saving,
+        ),
     ) {
+        val focusManager = LocalFocusManager.current
+        val keyboard = LocalSoftwareKeyboardController.current
+        val changeAvatarLabel = stringResource(R.string.avatar_change_avatar)
+        fun closeEditor() {
+            if (!editing) return
+            focusManager.clearFocus(force = true)
+            keyboard?.hide()
+            pendingPhoto = null
+            photoMessage = 0
+            draftAvatar = null
+            avatarEdited = false
+            editing = false
+        }
+
+        BackHandler(enabled = editing) { if (!saving) closeEditor() }
+        val editorTransition = updateTransition(editing, label = "Agent soul editor")
+        val resizeSpec = tween<IntSize>(240, easing = AmberFeedback.EaseOut)
+        val fadeSpec = tween<Float>(AmberFeedback.OptionMs, easing = AmberFeedback.EaseOut)
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 18.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             // Sheet Title Bar
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -184,9 +291,10 @@ fun AgentSoulSheet(
                 if (!soulState.isDefault) {
                     TextButton(
                         onClick = {
-                            editing = false
+                            closeEditor()
                             agentSoulStore.resetToDefault(source = AgentSoulStore.SOURCE_ANDROID_UI)
                         },
+                        enabled = !saving,
                         modifier = Modifier.testTag("agent-soul-reset-default"),
                     ) {
                         Text(
@@ -209,14 +317,53 @@ fun AgentSoulSheet(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        PersonaMonogramBadge(name = soulState.displayName, sizeDp = 46)
+                        Box(
+                            modifier = Modifier
+                                .size(52.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable(
+                                    enabled = !saving && !pickingPhoto && pendingPhoto == null,
+                                    role = Role.Button,
+                                ) {
+                                    if (saving || pickingPhoto || pendingPhoto != null) return@clickable
+                                    photoMessage = 0
+                                    pickingPhoto = true
+                                    try {
+                                        photoPicker.launch(
+                                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                                        )
+                                    } catch (_: ActivityNotFoundException) {
+                                        pickingPhoto = false
+                                        photoMessage = R.string.agent_persona_avatar_import_error
+                                    }
+                                }
+                                .semantics { contentDescription = changeAvatarLabel }
+                                .testTag("agent-soul-change-avatar"),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            AmberPersonaMedallion(diameter = 46.dp, avatar = shownAvatar)
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .size(20.dp)
+                                    .border(1.5.dp, tokens.surface, CircleShape)
+                                    .background(tokens.accent, CircleShape),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = Lucide.Image,
+                                    contentDescription = null,
+                                    tint = tokens.accentInk,
+                                    modifier = Modifier.size(11.dp),
+                                )
+                            }
+                        }
                         Column(
                             modifier = Modifier.weight(1f),
                             verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -246,13 +393,9 @@ fun AgentSoulSheet(
                         }
                         TextButton(
                             onClick = {
-                                if (!editing) {
-                                    draftName = soulState.displayName
-                                    draftTagline = soulState.tagline
-                                    draftSoul = soulState.soulMarkdown
-                                }
-                                editing = !editing
+                                if (editing) closeEditor() else beginEditing()
                             },
+                            enabled = !saving,
                             modifier = Modifier.testTag("agent-soul-toggle-edit"),
                         ) {
                             Text(
@@ -265,90 +408,227 @@ fun AgentSoulSheet(
                         }
                     }
 
-                    if (!editing && soulState.soulMarkdown.isNotBlank()) {
+                    val statusMessage = if (pendingPhoto != null) {
+                        R.string.agent_persona_avatar_importing
+                    } else {
+                        photoMessage
+                    }
+                    if (statusMessage != 0) {
+                        Text(
+                            text = stringResource(statusMessage),
+                            style = type.secondary,
+                            color = if (photoMessage != 0) MaterialTheme.colorScheme.error else tokens.ink3,
+                            modifier = Modifier.padding(top = 8.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                        )
+                    }
+
+                    editorTransition.AnimatedContent(
+                        modifier = Modifier.fillMaxWidth(),
+                        transitionSpec = {
+                            (fadeIn(fadeSpec) togetherWith fadeOut(fadeSpec))
+                                .using(SizeTransform { _, _ -> resizeSpec })
+                        },
+                    ) { showEditor ->
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(tokens.surface2)
-                                .padding(12.dp),
+                                .then(
+                                    if (showEditor == editing) Modifier
+                                    else Modifier.semantics { hideFromAccessibility() },
+                                ),
+                        ) {
+                            if (showEditor) {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    if (shownAvatar != null) {
+                                        TextButton(
+                                            onClick = {
+                                                draftAvatar = null
+                                                avatarEdited = true
+                                                photoMessage = 0
+                                            },
+                                            enabled = editing && !saving && !pickingPhoto && pendingPhoto == null,
+                                            modifier = Modifier.testTag("agent-soul-reset-avatar"),
+                                        ) {
+                                            Text(stringResource(R.string.agent_persona_avatar_restore))
+                                        }
+                                    }
+                                    val fieldColors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = tokens.accent,
+                                        unfocusedBorderColor = tokens.line2,
+                                        focusedLabelColor = tokens.accent,
+                                        unfocusedLabelColor = tokens.ink3,
+                                        focusedTextColor = tokens.ink,
+                                        unfocusedTextColor = tokens.ink,
+                                    )
+                                    OutlinedTextField(
+                                        value = draftName,
+                                        enabled = editing && !saving,
+                                        onValueChange = {
+                                            draftName = it.take(AgentSoulStore.MAX_NAME_LENGTH)
+                                            textEdited = true
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("agent-soul-name-input"),
+                                        singleLine = true,
+                                        label = { Text("称呼（默认 Amber）", style = type.secondary) },
+                                        colors = fieldColors,
+                                    )
+                                    OutlinedTextField(
+                                        value = draftTagline,
+                                        enabled = editing && !saving,
+                                        onValueChange = {
+                                            draftTagline = it.take(AgentSoulStore.MAX_TAGLINE_LENGTH)
+                                            textEdited = true
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("agent-soul-tagline-input"),
+                                        singleLine = true,
+                                        label = { Text("一句话签名", style = type.secondary) },
+                                        colors = fieldColors,
+                                    )
+                                    OutlinedTextField(
+                                        value = draftSoul,
+                                        enabled = editing && !saving,
+                                        onValueChange = {
+                                            draftSoul = it.take(AgentSoulStore.MAX_SOUL_LENGTH)
+                                            textEdited = true
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(min = 140.dp, max = 280.dp)
+                                            .testTag("agent-soul-markdown-input"),
+                                        minLines = 5,
+                                        maxLines = 12,
+                                        label = { Text("性格、语气与相处方式（Soul Markdown）", style = type.secondary) },
+                                        colors = fieldColors,
+                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.End,
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        TextButton(onClick = ::closeEditor, enabled = editing && !saving) {
+                                            Text("取消", style = type.secondary.copy(color = tokens.ink3))
+                                        }
+                                        TextButton(
+                                            onClick = {
+                                                if (!editing || saving || pendingPhoto != null) return@TextButton
+                                                saving = true
+                                                scope.launch {
+                                                    try {
+                                                        if (avatarEdited) avatarStore.save(draftAvatar)
+                                                    } catch (error: CancellationException) {
+                                                        throw error
+                                                    } catch (_: Exception) {
+                                                        photoMessage = R.string.agent_persona_avatar_save_error
+                                                        return@launch
+                                                    } finally {
+                                                        saving = false
+                                                    }
+                                                    if (textEdited) {
+                                                        agentSoulStore.update(
+                                                            displayName = draftName,
+                                                            tagline = draftTagline,
+                                                            soulMarkdown = draftSoul,
+                                                            source = AgentSoulStore.SOURCE_ANDROID_UI,
+                                                        )
+                                                    }
+                                                    closeEditor()
+                                                }
+                                            },
+                                            enabled = editing && !saving && pendingPhoto == null,
+                                            modifier = Modifier.testTag("agent-soul-save-button"),
+                                        ) {
+                                            Text(
+                                                text = "保存形象人设",
+                                                style = type.secondary.copy(
+                                                    color = tokens.accent,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                ),
+                                            )
+                                        }
+                                    }
+                                }
+                            } else if (soulState.soulMarkdown.isNotBlank()) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 12.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(tokens.surface2)
+                                        .padding(12.dp),
+                                ) {
+                                    Text(
+                                        text = soulState.soulMarkdown,
+                                        style = type.body,
+                                        color = tokens.ink,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            editorTransition.AnimatedVisibility(
+                visible = { !it },
+                enter = expandVertically(resizeSpec, expandFrom = Alignment.Top) + fadeIn(fadeSpec),
+                exit = shrinkVertically(resizeSpec, shrinkTowards = Alignment.Top) + fadeOut(fadeSpec),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 14.dp)
+                        .then(
+                            if (editing) Modifier.semantics { hideFromAccessibility() }
+                            else Modifier,
+                        ),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    // Conversational Self-Shaping Guidance Banner
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(tokens.surface2)
+                            .border(1.dp, tokens.line, RoundedCornerShape(12.dp))
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                    ) {
+                        Text(
+                            text = "提示：你也可以直接在聊天中对 AI 说「以后叫你小琥珀，说话简洁毒舌一点」，AI 会直接调用 agent_soul_update 工具更新形象人设并同步到云端。",
+                            style = type.secondary,
+                            color = tokens.ink2,
+                        )
+                    }
+
+                    // History Snapshots Section
+                    if (soulState.history.isNotEmpty()) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Text(
-                                text = soulState.soulMarkdown,
-                                style = type.body,
-                                color = tokens.ink,
+                                text = "历史人设快照（最近 ${soulState.history.size} 条）",
+                                style = type.secondary.copy(fontWeight = FontWeight.SemiBold),
+                                color = tokens.ink2,
                             )
-                        }
-                    }
-
-                    if (editing) {
-                        val fieldColors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = tokens.accent,
-                            unfocusedBorderColor = tokens.line2,
-                            focusedLabelColor = tokens.accent,
-                            unfocusedLabelColor = tokens.ink3,
-                            focusedTextColor = tokens.ink,
-                            unfocusedTextColor = tokens.ink,
-                        )
-                        OutlinedTextField(
-                            value = draftName,
-                            onValueChange = { draftName = it.take(AgentSoulStore.MAX_NAME_LENGTH) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("agent-soul-name-input"),
-                            singleLine = true,
-                            label = { Text("称呼（默认 Amber）", style = type.secondary) },
-                            colors = fieldColors,
-                        )
-                        OutlinedTextField(
-                            value = draftTagline,
-                            onValueChange = { draftTagline = it.take(AgentSoulStore.MAX_TAGLINE_LENGTH) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("agent-soul-tagline-input"),
-                            singleLine = true,
-                            label = { Text("一句话签名", style = type.secondary) },
-                            colors = fieldColors,
-                        )
-                        OutlinedTextField(
-                            value = draftSoul,
-                            onValueChange = { draftSoul = it.take(AgentSoulStore.MAX_SOUL_LENGTH) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(min = 140.dp, max = 280.dp)
-                                .testTag("agent-soul-markdown-input"),
-                            minLines = 5,
-                            maxLines = 12,
-                            label = { Text("性格、语气与相处方式（Soul Markdown）", style = type.secondary) },
-                            colors = fieldColors,
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            TextButton(onClick = { editing = false }) {
-                                Text("取消", style = type.secondary.copy(color = tokens.ink3))
-                            }
-                            TextButton(
-                                onClick = {
-                                    agentSoulStore.update(
-                                        displayName = draftName,
-                                        tagline = draftTagline,
-                                        soulMarkdown = draftSoul,
-                                        resetToDefault = false,
-                                        source = AgentSoulStore.SOURCE_ANDROID_UI,
-                                    )
-                                    editing = false
-                                },
-                                modifier = Modifier.testTag("agent-soul-save-button"),
-                            ) {
-                                Text(
-                                    text = "保存形象人设",
-                                    style = type.secondary.copy(
-                                        color = tokens.accent,
-                                        fontWeight = FontWeight.SemiBold,
-                                    ),
+                            soulState.history.forEach { snapshot ->
+                                SnapshotHistoryRow(
+                                    snapshot = snapshot,
+                                    enabled = !editing,
+                                    onRestore = {
+                                        if (!editing) {
+                                            agentSoulStore.restoreSnapshot(
+                                                snapshotId = snapshot.id,
+                                                source = AgentSoulStore.SOURCE_ANDROID_UI,
+                                            )
+                                        }
+                                    },
                                 )
                             }
                         }
@@ -356,49 +636,7 @@ fun AgentSoulSheet(
                 }
             }
 
-            // Conversational Self-Shaping Guidance Banner
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(tokens.surface2)
-                    .border(1.dp, tokens.line, RoundedCornerShape(12.dp))
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
-            ) {
-                Text(
-                    text = "提示：你也可以直接在聊天中对 AI 说「以后叫你小琥珀，说话简洁毒舌一点」，AI 会直接调用 agent_soul_update 工具更新形象人设并同步到云端。",
-                    style = type.secondary,
-                    color = tokens.ink2,
-                )
-            }
-
-            // History Snapshots Section
-            if (soulState.history.isNotEmpty()) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Text(
-                        text = "历史人设快照（最近 ${soulState.history.size} 条）",
-                        style = type.secondary.copy(fontWeight = FontWeight.SemiBold),
-                        color = tokens.ink2,
-                    )
-                    soulState.history.forEach { snapshot ->
-                        SnapshotHistoryRow(
-                            snapshot = snapshot,
-                            onRestore = {
-                                editing = false
-                                agentSoulStore.restoreSnapshot(
-                                    snapshotId = snapshot.id,
-                                    source = AgentSoulStore.SOURCE_ANDROID_UI,
-                                )
-                            },
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(26.dp))
         }
     }
 }
@@ -406,6 +644,7 @@ fun AgentSoulSheet(
 @Composable
 private fun SnapshotHistoryRow(
     snapshot: AgentSoulSnapshot,
+    enabled: Boolean,
     onRestore: () -> Unit,
 ) {
     val tokens = LocalAmberTokens.current
@@ -466,6 +705,7 @@ private fun SnapshotHistoryRow(
             }
             TextButton(
                 onClick = onRestore,
+                enabled = enabled,
                 modifier = Modifier.testTag("agent-soul-restore-${snapshot.id}"),
             ) {
                 Text(

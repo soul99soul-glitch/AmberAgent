@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="agent_persona_avatar_restore">Restore default fox</string>
+    <string name="agent_persona_avatar_importing">Preparing photo…</string>
+    <string name="agent_persona_avatar_import_error">Could not open this photo. Choose another image.</string>
+    <string name="agent_persona_avatar_save_error">Could not save the avatar. Try again.</string>
+</resources>

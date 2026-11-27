@@ -3,7 +3,6 @@ package app.amber.core.ai.tools
 import android.content.Context
 import app.amber.ai.core.Tool
 import app.amber.core.model.LocalToolOption
-import app.amber.core.event.AppEventBus
 import app.amber.feature.system.AgentPermissionBroker
 import app.amber.feature.tools.AgentCronTools
 import app.amber.feature.tools.ICloudDriveTools
@@ -19,7 +18,6 @@ import app.amber.feature.tools.WorkspaceArtifactTools
 import app.amber.feature.tools.WorkspaceTools
 import app.amber.feature.reminder.ReminderTools
 import app.amber.feature.prompts.AgentPromptConfigRepository
-import app.amber.feature.board.hotlist.deepread.DeepReadPlaybookRepository
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.utils.appLocale
 import app.amber.feature.webview.WebViewOperationStore
@@ -27,7 +25,6 @@ import kotlin.uuid.Uuid
 
 class LocalTools(
     private val context: Context,
-    private val eventBus: AppEventBus,
     private val workspaceTools: WorkspaceTools,
     private val terminalTools: TerminalTools,
     private val screenAutomationTools: ScreenAutomationTools,
@@ -42,7 +39,6 @@ class LocalTools(
     private val settingsStore: SettingsAggregator,
     private val imageGenerationTools: ImageGenerationLocalTools,
     private val promptConfigRepository: AgentPromptConfigRepository,
-    private val deepReadPlaybookRepository: DeepReadPlaybookRepository,
     private val healthSummaryReader: app.amber.feature.health.HealthSummaryReader,
     private val reminderTools: ReminderTools,
     private val jevDecisionCoordinator: app.amber.core.jev.JevDecisionCoordinator,
@@ -72,10 +68,6 @@ class LocalTools(
     val webViewOpenLinkTool by lazy { createWebViewOpenLinkTool(webViewOperationStore) }
 
     val askUserTool by lazy { createAskUserTool() }
-
-    val deepReadOpenTool by lazy { createDeepReadOpenTool(eventBus) }
-
-    private val deepReadPlaybookTools by lazy { DeepReadPlaybookTools(deepReadPlaybookRepository) }
 
     /**
      * Registry-introspection tools — the pair (`tools_list`, `tool_policy_explain`)
@@ -161,8 +153,6 @@ class LocalTools(
         tools.addAll(agentCronTools.getTools())
         tools.add(runPlanUpdateTool)
         tools.add(agentPromptConfigTool)
-        tools.addAll(deepReadPlaybookTools.getTools())
-        tools.add(deepReadOpenTool)
 
         imageGenerationTools.getTool(conversationId)?.let(tools::add)
 

@@ -75,13 +75,6 @@
     <string name="setting_provider_page_capabilities">能力</string>
     <string name="setting_provider_page_vision">视觉</string>
 
-    <!-- Novel workspace -->
-    <string name="novel_writing_model">写作模型</string>
-    <string name="novel_models_section">模型</string>
-    <string name="novel_chapters_section">章节</string>
-    <string name="novel_chapter_title">章节标题</string>
-    <string name="novel_draft">草稿</string>
-    <string name="novel_project_ghostwrite_running">当前项目仍有代笔批次运行，请先让批次完成或取消后再删除</string>
 
     <!-- Debug / Developer / Log -->
     <string name="debug_avatar_editor">头像编辑器</string>
@@ -120,10 +113,6 @@
     <string name="session_home_message_count">%1$s 条</string>
 
     <!-- Board -->
-    <string name="deep_read_template_custom_empty">还没有自定义模板</string>
-    <string name="deep_read_template_custom_empty_hint">创建后会出现在这里</string>
-    <string name="board_pull_to_refresh">下拉刷新</string>
-    <string name="board_custom_sources_empty">还没有自定义来源</string>
 
     <!-- Shortcuts / Council -->
     <string name="shortcut_new_chat">新建会话</string>
@@ -157,18 +146,6 @@
     <string name="model_council_role_risk">风险</string>
 
     <!-- NewsNow preset display names -->
-    <string name="board_newsnow_preset_zhihu">知乎热榜</string>
-    <string name="board_newsnow_preset_weibo">微博热搜</string>
-    <string name="board_newsnow_preset_douyin">抖音热搜</string>
-    <string name="board_newsnow_preset_coolapk">酷安</string>
-    <string name="board_newsnow_preset_bilibili">B 站热搜</string>
-    <string name="board_newsnow_preset_v2ex">V2EX 分享</string>
-    <string name="board_newsnow_preset_github">GitHub 趋势</string>
-    <string name="board_newsnow_preset_36kr">36 氪 快讯</string>
-    <string name="board_newsnow_preset_hupu">虎扑步行街</string>
-    <string name="board_newsnow_preset_xueqiu">雪球 热股</string>
-    <string name="board_newsnow_preset_wallstreet">华尔街见闻 热门</string>
-    <string name="board_newsnow_preset_cls">财联社 电报</string>
 
     <!-- Antigravity / Grok OAuth library errors -->
     <string name="antigravity_oauth_stale_session">Antigravity OAuth 会话已变更，已丢弃过期响应，请重试。</string>

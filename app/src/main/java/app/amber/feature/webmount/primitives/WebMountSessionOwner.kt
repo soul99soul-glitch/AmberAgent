@@ -80,12 +80,6 @@ sealed interface WebMountLeaseResult {
 class WebMountSessionOwner(
     context: Context,
     private val pool: WebViewPool,
-    /**
-     * Host-owned resolver for credential-bearing ZCode reopen URLs. The
-     * resolver must return a URL only when [sessionId] is still the selected
-     * connection's exact session id; null deliberately means no fallback.
-     */
-    private val resolveZCodeReopenUrl: suspend (sessionId: String) -> String? = { null },
 ) {
     private val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val lock = Any()
@@ -318,23 +312,10 @@ class WebMountSessionOwner(
         conversationId: String? = null,
     ): WebMountLeaseResult {
         val normalizedSessionId = sessionId.trim()
-        val safeUrl = if (normalizedSessionId.startsWith("wm_zcode_")) {
-            // ZCode's share credential lives in the user-owned connection
-            // store, while session metadata intentionally stores only a
-            // redacted URL. Never reconstruct a ZCode URL from metadata and
-            // never fall back when the selected connection no longer matches.
-            val resolved = try {
-                resolveZCodeReopenUrl(normalizedSessionId)
-            } catch (cancel: CancellationException) {
-                throw cancel
-            } catch (_: Throwable) {
-                null
-            }
-            resolved
-                ?.let(::safeZCodeReopenUrl)
-        } else {
-            safeReopenUrl(metadata(normalizedSessionId)?.redactedUrl)
-        }
+        // Older sessions reference a retired host-owned share credential.
+        val safeUrl = metadata(normalizedSessionId)?.redactedUrl
+            ?.takeUnless { normalizedSessionId.startsWith("wm_zcode_") }
+            ?.let(::safeReopenUrl)
         if (safeUrl == null) {
             return WebMountLeaseResult.Rejected(
                 WebMountLeaseFailure.NEEDS_REOPEN,
@@ -426,11 +407,7 @@ class WebMountSessionOwner(
         true
     }
 
-    /**
-     * Dispatch the one synchronous navigation needed while preparing an
-     * explicitly opened ZCode page. HUMAN leases do not carry an agent
-     * conversation/run identity, so they use this narrow lease-only guard.
-     */
+    /** Dispatch navigation only while the user still owns the lease. */
     fun dispatchIfHumanActive(
         leaseId: String,
         action: () -> Unit,
@@ -774,21 +751,6 @@ class WebMountSessionOwner(
         if (path.any { it.isISOControl() }) return null
         val port = if (uri.port >= 0) ":${uri.port}" else ""
         return "$scheme://${host.lowercase(Locale.ROOT)}$port$path"
-    }
-
-    /**
-     * Validate a complete host-owned ZCode URL without stripping its share
-     * query/fragment. The value is used only for this in-memory load; normal
-     * owner metadata and page summaries still pass through redaction.
-     */
-    private fun safeZCodeReopenUrl(url: String): String? {
-        val uri = runCatching { URI(url.trim()) }.getOrNull() ?: return null
-        val scheme = uri.scheme?.lowercase(Locale.ROOT)
-        if (scheme != "http" && scheme != "https") return null
-        val host = uri.host?.takeIf { it.isNotBlank() } ?: return null
-        if (uri.userInfo != null) return null
-        if (url.any { it.isISOControl() }) return null
-        return url.trim()
     }
 
     private fun publishLocked() {

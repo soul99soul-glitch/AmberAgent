@@ -29,7 +29,6 @@ import app.amber.agent.data.db.fts.MessageFtsManager
 import app.amber.agent.data.workspace.ArtifactBackupContentStore
 import app.amber.core.files.FileFolders
 import app.amber.core.files.FilesManager
-import app.amber.feature.novelworkspace.NovelWorkspaceProjectRepository
 import app.amber.feature.workspace.WorkspaceManager
 import java.io.File
 import java.io.FileInputStream
@@ -67,7 +66,7 @@ class SyncArchiveManager(
         get() = SyncCrypto(nativeEnabled = nativePathPrefs.flow.value.syncCrypto)
     private val redactor = SyncRedactor(json)
     private val codec = SyncArchiveCodec(context, json)
-    private val payloadExporter = SyncPayloadExporter(context, database, json, secretRedactor, codec, workspaceManager)
+    private val payloadExporter = SyncPayloadExporter(context, database, json, secretRedactor, codec, workspaceManager, restoreWriteGate)
     private val fileRestoreJournal = SyncFileRestoreJournal(context.filesDir, context.cacheDir, database)
 
     /** Complete interrupted file/DB recovery before startup opens data consumers. */
@@ -752,7 +751,7 @@ class SyncArchiveManager(
         private const val MAX_PAYLOAD_FILES_TOTAL_BYTES = 1024L * 1024 * 1024
         private const val MAX_PAYLOAD_FILE_COUNT = 20_000
         private const val MAX_STAGED_TABLE_BYTES = 4L * 1024 * 1024 * 1024
-        internal const val NOVEL_WORKSPACE_ROOT = NovelWorkspaceProjectRepository.RELATIVE_ROOT
+        internal const val NOVEL_WORKSPACE_ROOT = "amberagent/novel-workspace"
         internal const val NOVEL_WORKSPACE_DATASET = "novel-workspace"
 
         // Subset of SYNC_TABLES whose rows describe local chat history.

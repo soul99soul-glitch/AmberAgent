@@ -51,6 +51,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -74,6 +75,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import app.amber.feature.ui.components.ds.AmberGlassRole
+import app.amber.feature.ui.components.ds.amberGlass
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
@@ -111,10 +114,14 @@ import com.composables.icons.lucide.ChevronRight
 import com.composables.icons.lucide.CircleAlert
 import com.composables.icons.lucide.CircleCheck
 import com.composables.icons.lucide.Clock
+import com.composables.icons.lucide.Inbox
 import com.composables.icons.lucide.Layers
 import com.composables.icons.lucide.Radio
 import com.composables.icons.lucide.Video
+import com.composables.icons.lucide.X
 import com.composables.icons.lucide.Lucide
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextAlign
 import kotlin.uuid.Uuid
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -540,6 +547,9 @@ fun ChatTopPanel(
         .compositeOver(theme.surface.copy(alpha = 1f))
     val shadow = if (theme.isDark) Color.Black.copy(alpha = 0.22f) else theme.ink.copy(alpha = 0.14f)
     val panelShape = MaterialTheme.shapes.extraLarge
+    val glassTokens = app.amber.feature.ui.theme.LocalAmberTokens.current
+    // Matches the bottom of the Panel glass body so the scroll hint blends in.
+    val panelFade = if (glassTokens.isDark) glassTokens.surface2 else androidx.compose.ui.graphics.lerp(glassTokens.bg, Color.White, 0.35f)
     val screenCap = (LocalConfiguration.current.screenHeightDp * 0.62f).dp
     BackHandler(enabled = visible, onBack = onDismiss)
     // The caller insets this box by the header and the composer, so the panel never
@@ -571,18 +581,30 @@ fun ChatTopPanel(
                     targetScale = 0.96f,
                     transformOrigin = TransformOrigin(transformOriginX, 0f),
                 ),
+            // The enter/exit fade renders into an offscreen layer sized to this node. Keep the
+            // gutters and the shadow's reach inside it, otherwise the soft panel shadow is clipped
+            // while alpha < 1 and pops in after the panel (and vanishes before it on exit).
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(start = PANEL_SIDE_GAP, end = PANEL_SIDE_GAP, top = PANEL_TOP_GAP),
+                .fillMaxWidth()
+                .wrapContentHeight(Alignment.Top, unbounded = true),
         ) {
+            Box(
+                Modifier.padding(
+                    start = PANEL_SIDE_GAP,
+                    end = PANEL_SIDE_GAP,
+                    top = PANEL_TOP_GAP,
+                    bottom = PANEL_SHADOW_REACH,
+                ),
+            ) {
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(max = maxPanelHeight)
-                    .shadow(12.dp, panelShape, clip = false, ambientColor = shadow, spotColor = shadow),
+                    // Lifted paper glass from the theme canvas; theme popover fills read muddy here.
+                    .amberGlass(panelShape, AmberGlassRole.Panel),
                 shape = panelShape,
-                color = popoverBg,
-                border = BorderStroke(1.dp, theme.surfaceEdge),
+                color = Color.Transparent,
             ) {
                 val scroll = rememberScrollState()
                 Box {
@@ -605,11 +627,12 @@ fun ChatTopPanel(
                                 .fillMaxWidth()
                                 .height(24.dp)
                                 .background(
-                                    Brush.verticalGradient(listOf(popoverBg.copy(alpha = 0f), popoverBg))
+                                    Brush.verticalGradient(listOf(panelFade.copy(alpha = 0f), panelFade))
                                 )
                         )
                     }
                 }
+            }
             }
         }
     }
@@ -619,6 +642,8 @@ private val PANEL_TOP_GAP = 6.dp
 // Matches the composer and suggestion chips below, so the panel sits inside the page gutter.
 private val PANEL_SIDE_GAP = 16.dp
 private val PANEL_BOTTOM_GAP = 8.dp
+// Downward reach of the Panel glass shadow (28dp blur + 10dp offset), kept inside the fade layer.
+private val PANEL_SHADOW_REACH = 40.dp
 
 // ── Recap ─────────────────────────────────────────────────────────────────────
 
@@ -860,33 +885,96 @@ fun ColumnScope.ChatShelfPanelContent(
     /** Null while the full conversation is being read. */
     items: List<ShelfItem>?,
     onOpen: (ShelfItem) -> Unit,
+    onClose: (() -> Unit)? = null,
 ) {
     val tokens = LocalAmberTokens.current
     val type = LocalAmberType.current
-    Text(
-        text = if (items.isNullOrEmpty()) {
-            stringResource(R.string.chat_shelf)
-        } else {
-            stringResource(R.string.chat_shelf_title_count, stringResource(R.string.chat_shelf), items.size)
-        },
-        style = type.screenTitle,
-        color = tokens.ink,
-        modifier = Modifier.padding(vertical = 4.dp),
-    )
+    val closeLabel = stringResource(R.string.chat_shelf_close_a11y)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("chat-artifact-shelf-panel"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(
+            imageVector = Lucide.Inbox,
+            contentDescription = null,
+            tint = tokens.accent,
+            modifier = Modifier.size(18.dp),
+        )
+        Text(
+            text = stringResource(R.string.chat_shelf),
+            style = type.screenTitle.copy(fontSize = 16.sp, lineHeight = 22.sp),
+            color = tokens.ink,
+        )
+        if (!items.isNullOrEmpty()) {
+            Text(
+                text = items.size.toString(),
+                style = type.meta.copy(
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    fontFeatureSettings = "tnum",
+                ),
+                color = tokens.ink3,
+            )
+        }
+        Spacer(Modifier.weight(1f))
+        if (onClose != null) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(CircleShape)
+                    .testTag("chat-artifact-shelf-close")
+                    .clickable(role = Role.Button, onClick = onClose)
+                    .semantics { contentDescription = closeLabel },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Lucide.X,
+                    contentDescription = null,
+                    tint = tokens.ink3,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        }
+    }
     if (items == null) {
         RecapLoadingRow(showLabel = false)
         return
     }
     if (items.isEmpty()) {
-        Text(
-            text = stringResource(R.string.chat_shelf_empty),
-            style = type.secondary,
-            color = tokens.ink3,
-            modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
-        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("chat-artifact-shelf-empty")
+                .padding(top = 12.dp, bottom = 16.dp, start = 12.dp, end = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(
+                imageVector = Lucide.Inbox,
+                contentDescription = null,
+                tint = tokens.ink3.copy(alpha = 0.72f),
+                modifier = Modifier.size(28.dp),
+            )
+            Text(
+                text = stringResource(R.string.chat_shelf_empty_title),
+                style = type.secondary.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
+                color = tokens.ink,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text = stringResource(R.string.chat_shelf_empty),
+                style = type.meta.copy(fontSize = 12.sp, lineHeight = 18.sp),
+                color = tokens.ink3,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.widthIn(max = 260.dp),
+            )
+        }
         return
     }
-    Spacer(Modifier.height(4.dp))
+    Spacer(Modifier.height(6.dp))
     items.forEach { item -> ShelfRow(item, onClick = { onOpen(item) }) }
 }
 

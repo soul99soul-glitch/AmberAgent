@@ -1,14 +1,6 @@
 package app.amber.agent
 
 import android.content.Context
-import app.amber.agent.data.db.dao.HotListDAO
-import app.amber.agent.data.db.entity.DeepReadCacheEntity
-import app.amber.core.utils.JsonInstant
-import app.amber.feature.board.hotlist.deepread.DeepReadGenerationPhase
-import app.amber.feature.board.hotlist.deepread.DeepReadGenerationStage
-import app.amber.feature.board.hotlist.deepread.DeepReadOutput
-import app.amber.feature.board.hotlist.deepread.DeepReadSectionState
-import app.amber.feature.board.hotlist.deepread.DeepReadSectionStatus
 import android.graphics.Bitmap
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.SemanticsNodeInteraction
@@ -186,32 +178,8 @@ class UiRefreshDeviceSmokeTest {
     }
 
     @Test
-    fun compactHomeCardAndCollapsedSearch() {
+    fun collapsedSearchRemainsReachableAfterScrolling() {
         assumeTrue(targetContext.applicationContext is AmberAgentApp)
-        val dao: HotListDAO = getKoin().get()
-        val topicId = "ui-home-compact-layout"
-        val article = "A misalignment of incentives in modern systems"
-        val now = System.currentTimeMillis()
-        runBlocking {
-            check(dao.getDeepRead(topicId) == null) { "Layout fixture already exists" }
-            val output = DeepReadOutput(
-                generationPhase = DeepReadGenerationPhase.IDLE,
-                sectionStates = mapOf(
-                    DeepReadGenerationStage.OVERVIEW to DeepReadSectionState(DeepReadSectionStatus.READY),
-                ),
-            )
-            dao.upsertDeepRead(
-                DeepReadCacheEntity(
-                    topicId = topicId,
-                    title = article,
-                    outputJson = JsonInstant.encodeToString(DeepReadOutput.serializer(), output),
-                    createdAt = now,
-                    updatedAt = now,
-                    expiresAt = now + 86_400_000L,
-                    sourceUrl = "https://example.com/article",
-                ),
-            )
-        }
         try {
             ActivityScenario.launch(RouteActivity::class.java).use {
                 seedConversations()
@@ -226,12 +194,6 @@ class UiRefreshDeviceSmokeTest {
                         insertedSmokeConversationIds += id
                     }
                 }
-                compose.waitUntil(timeoutMillis = 15_000) {
-                    compose.onAllNodesWithText(article, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
-                }
-                compose.onNodeWithText(article, useUnmergedTree = true).assertIsDisplayed()
-                compose.onNodeWithContentDescription(targetContext.getString(R.string.session_home_hide_continue_candidate))
-                    .assertDoesNotExist()
                 compose.onNode(hasSetTextAction()).assertDoesNotExist()
                 capture("09-home-compact-light")
 
@@ -256,7 +218,6 @@ class UiRefreshDeviceSmokeTest {
         } finally {
             // A disposable emulator may keep these fixtures briefly for native-speed screen recording.
             if (InstrumentationRegistry.getArguments().getString("keepPreviewData") != "true") {
-                runBlocking { dao.deleteDeepRead(topicId) }
                 deleteSeededConversations()
             }
         }

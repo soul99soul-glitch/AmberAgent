@@ -14,6 +14,7 @@ class ThemePageChromeTest {
     fun `entry metadata classifies home shell and content entries`() {
         val provider = entryProvider<NavKey> {
             entry<Screen.SessionHome>(metadata = themePageChromeMetadata(ThemePageChrome.Home)) {}
+            entry<Screen.PersonalAgent>(metadata = themePageChromeMetadata(ThemePageChrome.ConversationHome)) {}
             entry<Screen.Setting>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {}
             entry<Screen.SettingAppearance>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {}
             entry<Screen.Chat> {}
@@ -26,6 +27,7 @@ class ThemePageChromeTest {
 
         assertTrue(home.contentKey is String)
         assertEquals(ThemePageChrome.Home, themePageChromeFrom(home.metadata))
+        assertEquals(ThemePageChrome.ConversationHome, themePageChromeFrom(provider(Screen.PersonalAgent).metadata))
         assertEquals(ThemePageChrome.Shell, themePageChromeFrom(shell.metadata))
         assertEquals(ThemePageChrome.Shell, themePageChromeFrom(appearance.metadata))
         assertEquals(ThemePageChrome.Content, themePageChromeFrom(content.metadata))
@@ -46,6 +48,7 @@ class ThemePageChromeTest {
         )
 
         assertTrue(allowsThemeCanvasOverlay(omittedScope, ThemePageChrome.Home))
+        assertTrue(allowsThemeCanvasOverlay(omittedScope, ThemePageChrome.ConversationHome))
         assertFalse(allowsThemeCanvasOverlay(omittedScope, ThemePageChrome.Shell))
         assertFalse(allowsThemeCanvasOverlay(omittedScope, ThemePageChrome.Content))
         val shellScope = omittedScope.copy(canvasScope = "shell")

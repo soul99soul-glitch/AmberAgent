@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="setting_home_multi_device_title">Amber 多終端</string>
+    <string name="setting_home_multi_device_subtitle">雲端 · Mac</string>
+</resources>

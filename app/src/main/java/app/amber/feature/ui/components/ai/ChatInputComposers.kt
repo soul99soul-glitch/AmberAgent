@@ -46,6 +46,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
@@ -93,7 +95,9 @@ internal fun TextInputRow(
     onSendMessage: () -> Unit,
     onUsageClick: () -> Unit,
     onCompactContext: () -> Unit,
+    onInputFocusChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    focusRequester: FocusRequester? = null,
     minimalChrome: Boolean = false,
     hidePlaceholder: Boolean = false,
     placeholderOverride: String? = null,
@@ -117,7 +121,6 @@ internal fun TextInputRow(
     val slashCommandLabels = SlashCommandLabels(
         clearDescription = stringResource(R.string.chat_input_slash_clear_description),
         compactDescription = stringResource(R.string.chat_input_slash_compact_description),
-        deepReadDescription = stringResource(R.string.chat_input_slash_deep_read_description),
         subAgentDescription = stringResource(R.string.chat_input_slash_subagent_description),
         usageDescription = stringResource(R.string.chat_input_slash_usage_description),
         skillFallbackDescription = stringResource(R.string.chat_input_skill_description_fallback),
@@ -440,6 +443,7 @@ internal fun TextInputRow(
             modifier = Modifier
                 .testTag("chat-composer-input")
                 .fillMaxWidth()
+                .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
                 // Graphite 修：Material3 TextField 内部写死 MinHeight=56dp（无视 contentPadding /
                 // LocalMinimumInteractiveComponentSize）。这里只需传入一个「非零」minHeight 即可绕过
                 // 那道 56dp 地板——真实高度由内容决定（单行≈42dp，对称 padding 使文字在其内居中），
@@ -448,6 +452,7 @@ internal fun TextInputRow(
                 .contentReceiver(receiveContentListener)
                 .onFocusChanged {
                     isFocused = it.isFocused
+                    onInputFocusChanged(it.isFocused)
                     if (it.isFocused) {
                         ChatPerfTrace.observeFirstFocus()
                         ChatPerfCommandBridge.reportInteraction("input-tap", "input-focus")

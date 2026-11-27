@@ -4,6 +4,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
+import app.amber.feature.ui.components.ds.AmberGlassRole
+import app.amber.feature.ui.components.ds.amberGlass
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,26 +41,29 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.amber.agent.R
+import app.amber.feature.macgateway.GatewayEndpointRole
+import app.amber.feature.macgateway.MacGatewayRepository
+import app.amber.feature.ui.pages.setting.labelRes
 import app.amber.feature.ui.theme.LocalAmberTokens
 import com.composables.icons.lucide.Check
 import com.composables.icons.lucide.Cloud
 import com.composables.icons.lucide.Link2
+import com.composables.icons.lucide.Laptop
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Smartphone
 
 /**
  * Bottom-right `+1` host switcher pill aligned with iOS & HarmonyOS Amber Duet:
  * - Compact 40dp capsule showing `[phone/cloud icon] 本机 •` / `[cloud icon] 云端 •` (no chevron)
- * - Tap directly toggles Local <-> Cloud (or jumps to gateway pairing when unpaired)
- * - Long-press opens the explicit host selection menu
+ * Tap toggles the only paired host or opens the menu when both are available.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PersonalAgentHostPill(
-    isCloudSelected: Boolean,
-    cloudAvailable: Boolean,
-    gatewayName: String?,
-    onSelectCloud: (Boolean) -> Unit,
+    selectedRole: GatewayEndpointRole?,
+    cloud: MacGatewayRepository.State,
+    mac: MacGatewayRepository.State,
+    onSelectHost: (GatewayEndpointRole?) -> Unit,
     onOpenGatewayPairing: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -66,49 +71,31 @@ fun PersonalAgentHostPill(
     var expanded by remember { mutableStateOf(false) }
 
     val localLabel = stringResource(R.string.personal_agent_host_local)
-    val cloudLabel = stringResource(R.string.personal_agent_host_cloud)
-    val activeLabel = if (isCloudSelected) cloudLabel else localLabel
+    val activeLabel = selectedRole?.let { stringResource(it.labelRes) } ?: localLabel
+    val remoteSelected = selectedRole != null
     val switchA11y = stringResource(R.string.personal_agent_host_switch_a11y, activeLabel)
 
-    val pillFill = if (isCloudSelected) {
-        tokens.accent.copy(alpha = if (tokens.isDark) 0.18f else 0.10f).compositeOver(tokens.surface)
-    } else {
-        tokens.surface
-    }
-    val pillBorder = if (isCloudSelected) {
-        tokens.accent.copy(alpha = 0.36f)
-    } else {
-        tokens.floatingOutline
-    }
-    val dotColor = if (isCloudSelected) {
+    val dotColor = if (remoteSelected) {
         tokens.accent
     } else {
         tokens.ink3
     }
-    val elevation = if (tokens.isDark) 0.dp else 2.dp
 
     Box(modifier = modifier) {
         Row(
             modifier = Modifier
-                .height(38.dp)
-                .shadow(
-                    elevation = elevation,
-                    shape = CircleShape,
-                    clip = false,
-                    ambientColor = Color.Black.copy(alpha = 0.08f),
-                    spotColor = Color.Black.copy(alpha = 0.06f),
-                )
-                .clip(CircleShape)
-                .background(pillFill)
-                .border(width = 0.5.dp, color = pillBorder, shape = CircleShape)
+                .height(40.dp)
+                .amberGlass(CircleShape, AmberGlassRole.Control, highlighted = remoteSelected)
                 .testTag("personal-agent-host-pill")
                 .combinedClickable(
                     role = Role.Button,
                     onClick = {
-                        if (cloudAvailable) {
-                            onSelectCloud(!isCloudSelected)
-                        } else {
-                            onOpenGatewayPairing()
+                        when {
+                            cloud.canSelectCloud && mac.canSelectCloud -> expanded = true
+                            remoteSelected -> onSelectHost(null)
+                            cloud.canSelectCloud -> onSelectHost(GatewayEndpointRole.CLOUD)
+                            mac.canSelectCloud -> onSelectHost(GatewayEndpointRole.MAC)
+                            else -> onOpenGatewayPairing()
                         }
                     },
                     onLongClick = { expanded = true },
@@ -119,14 +106,18 @@ fun PersonalAgentHostPill(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Icon(
-                imageVector = if (isCloudSelected) Lucide.Cloud else Lucide.Smartphone,
+                imageVector = when (selectedRole) {
+                    GatewayEndpointRole.CLOUD -> Lucide.Cloud
+                    GatewayEndpointRole.MAC -> Lucide.Laptop
+                    null -> Lucide.Smartphone
+                },
                 contentDescription = null,
-                tint = if (isCloudSelected) tokens.accent else tokens.ink2,
+                tint = if (remoteSelected) tokens.accent else tokens.ink2,
                 modifier = Modifier.size(15.dp),
             )
             Text(
                 text = activeLabel,
-                color = if (isCloudSelected) tokens.ink else tokens.ink2,
+                color = if (remoteSelected) tokens.ink else tokens.ink2,
                 fontSize = 13.sp,
                 lineHeight = 16.sp,
                 fontWeight = FontWeight.Medium,
@@ -170,7 +161,7 @@ fun PersonalAgentHostPill(
                     }
                 },
                 trailingIcon = {
-                    if (!isCloudSelected) {
+                    if (!remoteSelected) {
                         Icon(
                             imageVector = Lucide.Check,
                             contentDescription = null,
@@ -181,62 +172,57 @@ fun PersonalAgentHostPill(
                 },
                 onClick = {
                     expanded = false
-                    if (isCloudSelected) {
-                        onSelectCloud(false)
+                    if (remoteSelected) {
+                        onSelectHost(null)
                     }
                 },
             )
-            DropdownMenuItem(
-                modifier = Modifier
-                    .heightIn(min = 48.dp)
-                    .testTag("personal-agent-host-option-cloud"),
-                enabled = cloudAvailable,
-                leadingIcon = {
-                    Icon(
-                        imageVector = Lucide.Cloud,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                },
-                text = {
-                    Column {
-                        Text(
-                            text = cloudLabel,
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        Text(
-                            text = if (cloudAvailable) {
-                                stringResource(
-                                    R.string.personal_agent_host_cloud_desc_paired,
-                                    gatewayName?.takeIf { it.isNotBlank() } ?: cloudLabel,
-                                )
-                            } else if (gatewayName != null) {
-                                stringResource(R.string.personal_agent_host_cloud_unsupported)
-                            } else {
-                                stringResource(R.string.personal_agent_host_cloud_desc_unpaired)
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = tokens.ink3,
-                        )
-                    }
-                },
-                trailingIcon = {
-                    if (isCloudSelected) {
+            GatewayEndpointRole.entries.forEach { role ->
+                val state = if (role == GatewayEndpointRole.CLOUD) cloud else mac
+                val isSelected = role == selectedRole
+                val label = stringResource(role.labelRes)
+                DropdownMenuItem(
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("personal-agent-host-option-${role.name.lowercase()}"),
+                    enabled = state.canSelectCloud,
+                    leadingIcon = {
                         Icon(
-                            imageVector = Lucide.Check,
+                            imageVector = if (role == GatewayEndpointRole.CLOUD) Lucide.Cloud else Lucide.Laptop,
                             contentDescription = null,
-                            tint = tokens.accent,
-                            modifier = Modifier.size(16.dp),
+                            modifier = Modifier.size(18.dp),
                         )
-                    }
-                },
-                onClick = {
-                    expanded = false
-                    if (cloudAvailable && !isCloudSelected) {
-                        onSelectCloud(true)
-                    }
-                },
-            )
+                    },
+                    text = {
+                        Column {
+                            Text(text = label, style = MaterialTheme.typography.bodyMedium)
+                            Text(
+                                text = when {
+                                    state.connection == null -> stringResource(R.string.amber_multi_device_not_paired)
+                                    !state.canSelectCloud -> stringResource(R.string.amber_multi_device_dialogue_unavailable)
+                                    else -> state.connection.name
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = tokens.ink3,
+                            )
+                        }
+                    },
+                    trailingIcon = {
+                        if (isSelected) {
+                            Icon(
+                                imageVector = Lucide.Check,
+                                contentDescription = null,
+                                tint = tokens.accent,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    },
+                    onClick = {
+                        expanded = false
+                        if (!isSelected) onSelectHost(role)
+                    },
+                )
+            }
             DropdownMenuItem(
                 modifier = Modifier.heightIn(min = 48.dp),
                 leadingIcon = {
@@ -248,7 +234,7 @@ fun PersonalAgentHostPill(
                 },
                 text = {
                     Text(
-                        text = stringResource(R.string.personal_agent_host_menu_gateway_settings),
+                        text = stringResource(R.string.setting_home_multi_device_title),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 },

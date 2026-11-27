@@ -8,7 +8,6 @@
     <string name="personal_agent_host_cloud_desc_unpaired">Pair a gateway first</string>
     <string name="personal_agent_sessions">Sessions</string>
     <string name="personal_agent_more">More</string>
-    <string name="personal_agent_menu_today_board">Today Board</string>
     <string name="personal_agent_menu_paired_gateway">Paired Gateway</string>
     <string name="personal_agent_menu_paired_gateway_connected">Connected: %1$s</string>
     <string name="personal_agent_menu_paired_gateway_unpaired">Not paired</string>
@@ -41,7 +40,6 @@
     <string name="personal_agent_drawer_section_features">Features &amp; Settings</string>
     <string name="personal_agent_drawer_phone_automation">Phone Automation</string>
     <string name="personal_agent_drawer_phone_automation_desc">Virtual display &amp; controls</string>
-    <string name="personal_agent_drawer_today_board_desc">Background &amp; today tasks</string>
     <string name="personal_agent_drawer_all_sessions">All Conversations</string>
     <string name="personal_agent_drawer_all_sessions_desc">Browse full history</string>
     <string name="personal_agent_drawer_shelf">Conversation Artifacts</string>
@@ -52,4 +50,23 @@
     <string name="personal_agent_drawer_current_badge">Current</string>
     <string name="personal_agent_drawer_untitled_topic">New Chat</string>
     <string name="personal_agent_host_menu_gateway_settings">Gateway settings…</string>
+    <string name="personal_agent_top_shelf_a11y">Artifact Shelf</string>
+    <string name="chat_shelf_empty_title">No artifacts in this chat yet</string>
+    <string name="chat_shelf_close_a11y">Close artifact shelf</string>
+    <string name="composer_thinking_unavailable_title">Thinking level unavailable</string>
+    <string name="composer_thinking_no_model_desc">Choose a model on the left to adjust thinking level.</string>
+    <string name="composer_thinking_unsupported_desc">The selected model does not declare reasoning support.</string>
+    <string name="composer_context_title">Context usage</string>
+    <string name="composer_context_messages">Messages</string>
+    <string name="composer_context_window">Context</string>
+    <string name="composer_context_speed">Speed</string>
+    <string name="composer_context_speed_empty">N/A</string>
+    <string name="composer_context_cache_hit">Cache hit</string>
+    <string name="composer_context_compacting">Compacting context</string>
+    <string name="composer_context_compact_action">Compact context</string>
+    <string name="personal_agent_panel_close_a11y">Close panel</string>
+    <string name="personal_agent_tasks_subtitle">Background &amp; multi-device tasks</string>
+    <string name="personal_agent_center_subtitle">Wakeups, monitors &amp; proactive triggers</string>
+    <string name="personal_agent_tasks_active_section">Running now</string>
+    <string name="personal_agent_tasks_history_section">Scheduled &amp; runtime tasks</string>
 </resources>

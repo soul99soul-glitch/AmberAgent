@@ -24,7 +24,7 @@ class PersonalAgentRestoredBackStackTest {
         val savedState = StateRestorationTester(compose)
         lateinit var stack: MutableList<NavKey>
         val target = Screen.Chat("11111111-1111-1111-1111-111111111111")
-        savedState.setContent { stack = rememberNavBackStack(Screen.TodayBoard) }
+        savedState.setContent { stack = rememberNavBackStack(Screen.PersonalAgentTasks) }
         compose.runOnIdle { applyExternalChatToBackStack(stack, target, LaunchStartMode.PERSONAL_AGENT) }
         savedState.emulateSavedInstanceStateRestore()
         compose.runOnIdle { assertEquals(listOf(Screen.PersonalAgent, target), stack) }

@@ -35,7 +35,6 @@ val toolExecutionModule = module {
     single {
         LocalTools(
             context = get(),
-            eventBus = get(),
             workspaceTools = get(),
             terminalTools = get(),
             screenAutomationTools = get(),
@@ -50,7 +49,6 @@ val toolExecutionModule = module {
             settingsStore = get(),
             imageGenerationTools = get(),
             promptConfigRepository = get(),
-            deepReadPlaybookRepository = get(),
             healthSummaryReader = get(),
             reminderTools = get(),
             jevDecisionCoordinator = get(),

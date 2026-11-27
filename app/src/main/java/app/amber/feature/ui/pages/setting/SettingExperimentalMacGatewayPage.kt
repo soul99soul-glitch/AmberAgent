@@ -3,8 +3,6 @@ package app.amber.feature.ui.pages.setting
 import android.app.KeyguardManager
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import android.text.format.DateUtils
 import android.text.format.Formatter
@@ -13,6 +11,8 @@ import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -30,6 +30,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -41,6 +44,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -54,7 +58,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import app.amber.agent.R
 import app.amber.agent.Screen
-import app.amber.core.utils.plus
+import app.amber.feature.macgateway.GatewayEndpointRole
+import app.amber.feature.macgateway.MacGatewayClient
 import app.amber.feature.macgateway.MacGatewayException
 import app.amber.feature.macgateway.MacGatewayPairingPayload
 import app.amber.feature.macgateway.MacGatewayRepository
@@ -67,7 +72,6 @@ import app.amber.feature.ui.components.ui.permission.rememberPermissionState
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
 import com.composables.icons.lucide.ChevronRight
-import com.composables.icons.lucide.Laptop
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.ShieldAlert
 import com.composables.icons.lucide.Sparkles
@@ -76,6 +80,7 @@ import io.github.g00fy2.quickie.ScanQRCode
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
@@ -89,6 +94,55 @@ private const val VISIBLE_TASK_LIMIT = 20
 fun SettingExperimentalMacGatewayPage(
     repository: MacGatewayRepository = koinInject(),
 ) {
+    val cloud by repository.slot(GatewayEndpointRole.CLOUD).state.collectAsStateWithLifecycle()
+    val mac by repository.slot(GatewayEndpointRole.MAC).state.collectAsStateWithLifecycle()
+    val selectedHost by repository.selectedDialogueRole.collectAsStateWithLifecycle()
+    var selectedTab by rememberSaveable { mutableStateOf<GatewayEndpointRole?>(null) }
+    val initialTab = if (cloud.loaded && mac.loaded) {
+        selectedHost ?: if (mac.connection != null && cloud.connection == null) GatewayEndpointRole.MAC else GatewayEndpointRole.CLOUD
+    } else null
+    LaunchedEffect(initialTab) {
+        if (selectedTab == null && initialTab != null) selectedTab = initialTab
+    }
+    val tab = selectedTab ?: initialTab ?: GatewayEndpointRole.CLOUD
+    val workspace = workspaceColors()
+    ExperimentalSettingsScaffold(title = stringResource(R.string.setting_home_multi_device_title)) { innerPadding ->
+        Column(Modifier.fillMaxSize().padding(innerPadding)) {
+            SingleChoiceSegmentedButtonRow(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                GatewayEndpointRole.entries.forEachIndexed { index, role ->
+                    SegmentedButton(
+                        shape = SegmentedButtonDefaults.itemShape(index, GatewayEndpointRole.entries.size),
+                        selected = tab == role,
+                        onClick = { selectedTab = role },
+                        colors = SegmentedButtonDefaults.colors(
+                            activeContainerColor = workspace.row,
+                            activeContentColor = workspace.ink,
+                            activeBorderColor = workspace.hairline,
+                            inactiveContainerColor = workspace.paper,
+                            inactiveContentColor = workspace.muted,
+                            inactiveBorderColor = workspace.hairline,
+                        ),
+                    ) { Text(stringResource(role.labelRes)) }
+                }
+            }
+            Crossfade(targetState = tab, animationSpec = tween(160), label = "endpoint") { role ->
+                GatewayEndpointSettings(role, repository.slot(role), active = tab == role)
+            }
+        }
+    }
+}
+
+internal val GatewayEndpointRole.labelRes: Int
+    get() = if (this == GatewayEndpointRole.CLOUD) R.string.personal_agent_host_cloud else R.string.amber_multi_device_mac
+
+@Composable
+private fun GatewayEndpointSettings(
+    role: GatewayEndpointRole,
+    repository: MacGatewayRepository,
+    active: Boolean,
+) {
     val state by repository.state.collectAsStateWithLifecycle()
     val navController = LocalNavController.current
     val context = LocalContext.current
@@ -97,7 +151,7 @@ fun SettingExperimentalMacGatewayPage(
     var pending by remember { mutableStateOf<MacGatewayPairingPayload?>(null) }
     var busy by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<Notice?>(null) }
-    var confirmsUnpair by remember { mutableStateOf(false) }
+    var unpairGeneration by remember { mutableStateOf<Long?>(null) }
 
     val notificationPermission = rememberPermissionState(
         permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) setOf(PermissionNotification) else emptySet(),
@@ -105,10 +159,13 @@ fun SettingExperimentalMacGatewayPage(
     PermissionManager(permissionState = notificationPermission)
 
     fun perform(block: suspend () -> Unit) {
+        if (!active || busy) return
+        busy = true
         scope.launch {
-            busy = true
             try {
                 block()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: Exception) {
                 notice = Notice(error.describe(context), error = true)
             } finally {
@@ -117,22 +174,62 @@ fun SettingExperimentalMacGatewayPage(
         }
     }
 
+    fun decideApproval(sessionKey: String, approval: MacGatewayStatus.PendingApproval, allow: Boolean, fromMacBoard: Boolean) {
+        notice = null
+        perform {
+            var biometricCancelled = false
+            try {
+                repository.decide(
+                    sessionKey = sessionKey,
+                    toolCallId = approval.toolCallId,
+                    allow = allow,
+                    highRisk = approval.highRisk,
+                    requiresLocalApproval = approval.effectiveRequiresLocalApproval,
+                    riskLevel = approval.riskLevel,
+                    expectedGeneration = state.generation,
+                    fromMacBoard = fromMacBoard,
+                    verifyForeground = activity?.let { host ->
+                        {
+                            val verified = host.verifyGatewayApproval(approval)
+                            if (!verified) biometricCancelled = true
+                            verified
+                        }
+                    },
+                )
+                notice = null
+            } catch (forbidden: MacGatewayException.Forbidden) {
+                if (!forbidden.requiresLocalApproval && biometricCancelled) {
+                    notice = Notice(
+                        context.getString(R.string.mac_gateway_approval_biometric_cancelled),
+                        error = false,
+                    )
+                } else {
+                    throw forbidden
+                }
+            }
+        }
+    }
+
     fun receiveLink(text: String) {
         val payload = MacGatewayPairingPayload.parse(text)
-        pending = payload
-        notice = if (payload == null) Notice(context.getString(R.string.mac_gateway_invalid_link), error = true) else null
+        pending = payload?.takeIf { it.role == null || it.role == role }
+        notice = when {
+            payload == null -> Notice(context.getString(R.string.mac_gateway_invalid_link), error = true)
+            pending == null -> Notice(context.getString(R.string.amber_multi_device_wrong_role), error = true)
+            else -> null
+        }
     }
 
     fun enablePush() {
         if (!notificationPermission.allPermissionsGranted) notificationPermission.requestPermissions()
-        perform { repository.uploadPushToken() }
+        perform { repository.uploadPushToken(state.generation) }
     }
 
     val scanLauncher = rememberLauncherForActivityResult(ScanQRCode()) { result ->
         when (result) {
             is QRResult.QRSuccess -> receiveLink(result.content.rawValue.orEmpty())
             QRResult.QRMissingPermission ->
-                notice = Notice(context.getString(R.string.synara_camera_permission_required), error = true)
+                notice = Notice(context.getString(R.string.amber_multi_device_camera_permission), error = true)
             is QRResult.QRError ->
                 notice = Notice(result.exception.message ?: context.getString(R.string.mac_gateway_invalid_link), error = true)
             QRResult.QRUserCanceled -> Unit
@@ -141,207 +238,201 @@ fun SettingExperimentalMacGatewayPage(
 
     val connection = state.connection
     val lifecycleOwner = LocalLifecycleOwner.current
-    LaunchedEffect(connection?.gatewayId, lifecycleOwner) {
-        if (connection == null) return@LaunchedEffect
+    LaunchedEffect(connection, state.generation, lifecycleOwner, active) {
+        if (!active || connection == null) return@LaunchedEffect
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (true) {
-                repository.refresh()
+                repository.refresh(state.generation)
+                if (role == GatewayEndpointRole.MAC) repository.refreshMacTasks(state.generation)
                 delay(REFRESH_INTERVAL_MS)
             }
         }
     }
-    val errorText = state.error?.takeIf { it !is MacGatewayException.Unreachable }?.describe(context)
+    val errorText = state.error?.describe(context)
     val shownNotice = notice ?: errorText?.let { Notice(it, error = true) }
 
-    ExperimentalSettingsScaffold(title = "Mac Gateway") { innerPadding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = innerPadding + PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            item {
-                ExperimentHeroCard(
-                    icon = { Icon(Lucide.Laptop, contentDescription = null) },
-                    title = "Mac Gateway",
-                    description = stringResource(R.string.mac_gateway_desc),
-                    trailing = {},
-                )
-            }
-            shownNotice?.let { item { ExperimentNote(text = it.text, error = it.error) } }
-            if (!state.loaded) return@LazyColumn
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        shownNotice?.let { item { ExperimentNote(text = it.text, error = it.error) } }
+        if (!state.loaded) {
+            item { ExperimentNote(stringResource(R.string.mac_gateway_connecting)) }
+            return@LazyColumn
+        }
 
-            val payload = pending
-            when {
-                payload != null -> item {
-                    ExperimentSectionCard(title = stringResource(R.string.mac_gateway_section_confirm)) {
-                        ExperimentStatusRow(stringResource(R.string.mac_gateway_name), payload.name)
-                        StackedValueRow(stringResource(R.string.mac_gateway_addresses), payload.addrs.joinToString("\n"))
-                        StackedValueRow(stringResource(R.string.mac_gateway_fingerprint), payload.fp, monospace = true)
-                        ExperimentNote(stringResource(R.string.mac_gateway_fingerprint_hint))
-                        ExperimentActionRow {
-                            ExperimentActionButton(stringResource(R.string.mac_gateway_pair), enabled = !busy, primary = true) {
-                                perform {
-                                    repository.pair(payload)
-                                    pending = null
-                                    notice = null
-                                    if (!notificationPermission.allPermissionsGranted) notificationPermission.requestPermissions()
-                                }
-                            }
-                            ExperimentActionButton(stringResource(R.string.mac_gateway_cancel), enabled = !busy) {
+        val payload = pending
+        when {
+            payload != null -> item {
+                ExperimentSectionCard(title = stringResource(R.string.mac_gateway_section_confirm)) {
+                    ExperimentStatusRow(stringResource(R.string.mac_gateway_name), payload.name)
+                    StackedValueRow(stringResource(R.string.mac_gateway_addresses), payload.addrs.joinToString("\n") { "$it:${payload.port}" })
+                    StackedValueRow(stringResource(R.string.mac_gateway_fingerprint), payload.fp, monospace = true)
+                    ExperimentNote(stringResource(R.string.amber_multi_device_fingerprint_hint))
+                    ExperimentActionRow {
+                        ExperimentActionButton(stringResource(R.string.mac_gateway_pair), enabled = !busy, primary = true) {
+                            perform {
+                                repository.pair(payload)
                                 pending = null
                                 notice = null
+                                if (!notificationPermission.allPermissionsGranted) notificationPermission.requestPermissions()
                             }
+                        }
+                        ExperimentActionButton(stringResource(R.string.mac_gateway_cancel), enabled = !busy) {
+                            pending = null
+                            notice = null
                         }
                     }
                 }
+            }
 
-                connection == null -> {
-                    item {
-                        ExperimentSectionCard(title = stringResource(R.string.mac_gateway_section_pair)) {
-                            ExperimentNote(stringResource(R.string.mac_gateway_pair_hint))
-                            ExperimentActionRow {
-                                ExperimentActionButton(stringResource(R.string.mac_gateway_scan), enabled = true, primary = true) {
-                                    scanLauncher.launch(null)
-                                }
-                                ExperimentActionButton(stringResource(R.string.mac_gateway_paste), enabled = true) {
-                                    receiveLink(context.clipboardText())
-                                }
-                            }
+            connection == null -> item {
+                ExperimentSectionCard(title = stringResource(R.string.mac_gateway_section_pair)) {
+                    ExperimentNote(stringResource(
+                        if (role == GatewayEndpointRole.MAC) R.string.mac_gateway_pair_hint
+                        else R.string.amber_multi_device_cloud_pair_hint,
+                    ))
+                    ExperimentActionRow {
+                        ExperimentActionButton(stringResource(R.string.mac_gateway_scan), enabled = !busy, primary = true) {
+                            scanLauncher.launch(null)
                         }
-                    }
-                    item {
-                        CloudDialogueSection(
-                            enabled = false,
-                            paired = false,
-                            onEnabledChange = {},
-                            onOpenProactiveCenter = { navController.navigate(Screen.CloudProactiveCenter) },
-                        )
+                        ExperimentActionButton(stringResource(R.string.mac_gateway_paste), enabled = !busy) {
+                            receiveLink(context.clipboardText())
+                        }
                     }
                 }
+            }
 
-                else -> {
-                    val status = state.status
-                    val pushRegistered = status?.device?.pushRegistered == true
-                    val pushOn = pushRegistered && notificationPermission.allPermissionsGranted
-                    item {
-                        ExperimentSectionCard(title = stringResource(R.string.mac_gateway_section_mac)) {
-                            ExperimentStatusRow(stringResource(R.string.mac_gateway_name), connection.name)
-                            ExperimentStatusRow(stringResource(R.string.mac_gateway_connection), reachabilityText(state))
-                            ExperimentStatusRow(
-                                stringResource(R.string.mac_gateway_notifications),
-                                // Without a status (Mac asleep) the push state is unknown, not "off".
-                                if (status == null) "—" else stringResource(
-                                    when {
-                                        pushOn -> R.string.mac_gateway_push_on
-                                        pushRegistered -> R.string.mac_gateway_push_blocked
-                                        else -> R.string.mac_gateway_push_off
-                                    },
-                                ),
-                            )
-                            if (state.reachable == false) ExperimentNote(stringResource(R.string.mac_gateway_offline_hint))
-                            ExperimentActionRow {
-                                ExperimentActionButton(stringResource(R.string.mac_gateway_refresh), enabled = !busy) {
-                                    perform { repository.refresh() }
-                                }
-                                if (pushOn) {
-                                    ExperimentActionButton(stringResource(R.string.mac_gateway_test_push), enabled = !busy) {
-                                        perform {
-                                            repository.testPush()
-                                            notice = Notice(context.getString(R.string.mac_gateway_test_push_sent), error = false)
-                                        }
-                                    }
-                                } else if (status != null) {
-                                    ExperimentActionButton(stringResource(R.string.mac_gateway_enable_push), enabled = !busy, primary = true) {
-                                        enablePush()
-                                    }
-                                }
-                                ExperimentActionButton(stringResource(R.string.mac_gateway_unpair), enabled = !busy, danger = true) {
-                                    confirmsUnpair = true
-                                }
-                            }
-                        }
-                    }
-                    item {
-                        CloudDialogueSection(
-                            enabled = state.cloudDialogueEnabled,
-                            paired = true,
-                            supported = state.cloudDialogueSupported != false,
-                            onEnabledChange = { checked ->
-                                scope.launch { repository.setCloudDialogueEnabled(checked) }
-                            },
-                            onOpenProactiveCenter = { navController.navigate(Screen.CloudProactiveCenter) },
+            else -> {
+                val status = state.status
+                val pushRegistered = status?.device?.pushRegistered == true
+                val pushOn = pushRegistered && notificationPermission.allPermissionsGranted
+                item {
+                    ExperimentSectionCard(title = stringResource(role.labelRes)) {
+                        ExperimentStatusRow(stringResource(R.string.mac_gateway_name), connection.name)
+                        ExperimentStatusRow(stringResource(R.string.mac_gateway_connection), reachabilityText(state))
+                        ExperimentStatusRow(
+                            stringResource(R.string.mac_gateway_notifications),
+                            if (state.reachable != true || status == null) "—" else stringResource(
+                                when {
+                                    pushOn -> R.string.mac_gateway_push_on
+                                    pushRegistered -> R.string.mac_gateway_push_blocked
+                                    else -> R.string.mac_gateway_push_off
+                                },
+                            ),
                         )
-                    }
-                    status?.health?.let { health -> item { HealthSection(health) } }
-                    item {
-                        TasksSection(
-                            sessions = MacGatewaySessionOrdering.visible(status?.sessions.orEmpty(), VISIBLE_TASK_LIMIT),
-                            synaraURL = status?.synaraURL,
-                            busy = busy,
-                            onMonitoredChange = { session, monitored ->
-                                scope.launch {
-                                    runCatching { repository.setMonitored(session.key, monitored) }
-                                        .onFailure { notice = Notice(it.describe(context), error = true) }
-                                }
-                            },
-                            onDecision = { session, approval, allow ->
-                                notice = null
+                        StackedValueRow(
+                            stringResource(R.string.mac_gateway_addresses),
+                            connection.addrs.joinToString("\n") { "$it:${connection.port}" },
+                        )
+                        StackedValueRow(stringResource(R.string.mac_gateway_fingerprint), connection.fingerprint, monospace = true)
+                        ExperimentActionRow {
+                            ExperimentActionButton(stringResource(R.string.mac_gateway_refresh), enabled = !busy) {
                                 perform {
-                                    var biometricCancelled = false
-                                    try {
-                                        repository.decide(
-                                            sessionKey = session.key,
-                                            toolCallId = approval.toolCallId,
-                                            allow = allow,
-                                            highRisk = approval.highRisk,
-                                            requiresLocalApproval = approval.effectiveRequiresLocalApproval,
-                                            riskLevel = approval.riskLevel,
-                                            verifyForeground = activity?.let { host ->
-                                                {
-                                                    val verified = host.verifyGatewayApproval(approval)
-                                                    if (!verified) biometricCancelled = true
-                                                    verified
-                                                }
-                                            },
-                                        )
-                                        notice = null
-                                    } catch (forbidden: MacGatewayException.Forbidden) {
-                                        if (!forbidden.requiresLocalApproval && biometricCancelled) {
-                                            notice = Notice(
-                                                context.getString(R.string.mac_gateway_approval_biometric_cancelled),
-                                                error = false,
-                                            )
-                                        } else {
-                                            throw forbidden
-                                        }
+                                    notice = null
+                                    repository.refresh(state.generation)
+                                    if (role == GatewayEndpointRole.MAC) repository.refreshMacTasks(state.generation)
+                                }
+                            }
+                            if (pushOn && state.reachable == true) {
+                                ExperimentActionButton(stringResource(R.string.mac_gateway_test_push), enabled = !busy) {
+                                    perform {
+                                        repository.testPush(state.generation)
+                                        notice = Notice(context.getString(R.string.mac_gateway_test_push_sent), error = false)
                                     }
                                 }
+                            } else if (state.reachable == true) {
+                                ExperimentActionButton(stringResource(R.string.mac_gateway_enable_push), enabled = !busy, primary = true) {
+                                    enablePush()
+                                }
+                            }
+                            ExperimentActionButton(stringResource(R.string.mac_gateway_unpair), enabled = !busy, danger = true) {
+                                unpairGeneration = state.generation
+                            }
+                        }
+                    }
+                }
+                item {
+                    CloudDialogueSection(
+                        enabled = state.cloudDialogueEnabled,
+                        paired = true,
+                        role = role,
+                        busy = busy,
+                        supported = state.cloudDialogueSupported != false,
+                        onEnabledChange = { checked ->
+                            perform {
+                                notice = null
+                                if (!repository.setCloudDialogueEnabled(checked, state.generation)) {
+                                    notice = Notice(context.getString(R.string.amber_multi_device_dialogue_unavailable), error = true)
+                                }
+                            }
+                        },
+                        onOpenProactiveCenter = if (role == GatewayEndpointRole.CLOUD) {
+                            { navController.navigate(Screen.CloudProactiveCenter) }
+                        } else null,
+                    )
+                }
+                if (role == GatewayEndpointRole.CLOUD && active) {
+                    item { CloudEndpointDetail(repository, state, MacGatewayClient::requestCloudDetail) }
+                }
+                if (state.reachable == true) {
+                    status?.health?.let { health ->
+                        val hasMacMetrics = role == GatewayEndpointRole.MAC &&
+                            listOf(health.batteryPercent, health.memoryPressure, health.thermal).any { it != null }
+                        if (health.diskFreeBytes != null || hasMacMetrics) {
+                            item { HealthSection(health, role) }
+                        }
+                    }
+                }
+                if (role == GatewayEndpointRole.MAC) {
+                    item {
+                        MacRemoteTasksSettings(
+                            repository = repository,
+                            state = state,
+                            active = active,
+                            approvalBusy = busy,
+                            approvalError = notice?.takeIf { it.error }?.text,
+                            onDecision = { approval, allow ->
+                                decideApproval(approval.sessionKey, approval.asPendingApproval(), allow, fromMacBoard = true)
                             },
                         )
                     }
+                }
+                if (state.reachable == true && (role == GatewayEndpointRole.MAC || !status?.sessions.isNullOrEmpty())) item {
+                    TasksSection(
+                        sessions = MacGatewaySessionOrdering.visible(status?.sessions.orEmpty(), VISIBLE_TASK_LIMIT),
+                        busy = busy,
+                        onMonitoredChange = { session, monitored ->
+                            perform { repository.setMonitored(session.key, monitored, state.generation) }
+                        },
+                        onDecision = { session, approval, allow ->
+                            decideApproval(session.key, approval, allow, fromMacBoard = false)
+                        },
+                    )
                 }
             }
         }
     }
 
-    if (confirmsUnpair) {
+    unpairGeneration?.let { generation ->
         AlertDialog(
-            onDismissRequest = { confirmsUnpair = false },
-            title = { Text(stringResource(R.string.mac_gateway_unpair_title)) },
-            text = { Text(stringResource(R.string.mac_gateway_unpair_message)) },
+            onDismissRequest = { unpairGeneration = null },
+            title = { Text(stringResource(R.string.amber_multi_device_unpair_title, stringResource(role.labelRes))) },
+            text = { Text(stringResource(R.string.amber_multi_device_unpair_message)) },
             confirmButton = {
                 TextButton(onClick = {
-                    confirmsUnpair = false
+                    unpairGeneration = null
                     perform {
-                        val acknowledged = repository.unpair()
-                        notice = if (acknowledged) null else Notice(context.getString(R.string.mac_gateway_unpaired_offline), error = false)
+                        val acknowledged = repository.unpair(generation)
+                        notice = if (acknowledged) null else Notice(context.getString(R.string.amber_multi_device_unpaired_offline), error = false)
                     }
                 }) {
                     Text(stringResource(R.string.mac_gateway_unpair), color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { confirmsUnpair = false }) { Text(stringResource(R.string.mac_gateway_keep)) }
+                TextButton(onClick = { unpairGeneration = null }) { Text(stringResource(R.string.mac_gateway_keep)) }
             },
         )
     }
@@ -354,9 +445,11 @@ internal fun CloudDialogueSection(
     onEnabledChange: (Boolean) -> Unit,
     onOpenProactiveCenter: (() -> Unit)? = null,
     supported: Boolean = true,
+    role: GatewayEndpointRole = GatewayEndpointRole.CLOUD,
+    busy: Boolean = false,
 ) {
     val workspace = workspaceColors()
-    ExperimentSectionCard(title = stringResource(R.string.mac_gateway_cloud_dialogue_section)) {
+    ExperimentSectionCard(title = stringResource(R.string.amber_multi_device_dialogue_section)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -367,7 +460,7 @@ internal fun CloudDialogueSection(
                 verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
                 Text(
-                    text = stringResource(R.string.mac_gateway_cloud_dialogue_title),
+                    text = stringResource(R.string.amber_multi_device_dialogue_select, stringResource(role.labelRes)),
                     style = MaterialTheme.typography.bodyLarge,
                     color = workspace.ink,
                 )
@@ -375,8 +468,8 @@ internal fun CloudDialogueSection(
                     text = stringResource(
                         when {
                             !paired -> R.string.mac_gateway_cloud_dialogue_unpaired_hint
-                            !supported -> R.string.personal_agent_host_cloud_unsupported
-                            else -> R.string.mac_gateway_cloud_dialogue_desc
+                            !supported -> R.string.amber_multi_device_dialogue_unavailable
+                            else -> R.string.amber_multi_device_dialogue_hint
                         },
                     ),
                     style = MaterialTheme.typography.bodySmall,
@@ -385,7 +478,7 @@ internal fun CloudDialogueSection(
             }
             Switch(
                 checked = enabled && paired && supported,
-                enabled = paired && supported,
+                enabled = paired && supported && !busy,
                 onCheckedChange = onEnabledChange,
             )
         }
@@ -436,43 +529,37 @@ internal fun CloudDialogueSection(
 }
 
 @Composable
-private fun HealthSection(health: MacGatewayStatus.Health) {
+private fun HealthSection(health: MacGatewayStatus.Health, role: GatewayEndpointRole) {
     val context = LocalContext.current
-    ExperimentSectionCard(title = stringResource(R.string.mac_gateway_section_health)) {
+    ExperimentSectionCard(title = stringResource(
+        if (role == GatewayEndpointRole.MAC) R.string.mac_gateway_section_health else R.string.amber_multi_device_host_health,
+    )) {
         health.diskFreeBytes?.let {
             ExperimentStatusRow(stringResource(R.string.mac_gateway_disk_free), Formatter.formatShortFileSize(context, it))
         }
-        health.batteryPercent?.let {
-            ExperimentStatusRow(
-                stringResource(R.string.mac_gateway_battery),
-                if (health.onBattery == true) stringResource(R.string.mac_gateway_battery_value, it)
-                else stringResource(R.string.mac_gateway_battery_value_charging, it),
-            )
+        if (role == GatewayEndpointRole.MAC) {
+            health.batteryPercent?.let {
+                ExperimentStatusRow(
+                    stringResource(R.string.mac_gateway_battery),
+                    if (health.onBattery == false) stringResource(R.string.mac_gateway_battery_value_charging, it)
+                    else stringResource(R.string.mac_gateway_battery_value, it),
+                )
+            }
+            health.memoryPressure?.let { ExperimentStatusRow(stringResource(R.string.mac_gateway_memory), levelLabel(it)) }
+            health.thermal?.let { ExperimentStatusRow(stringResource(R.string.mac_gateway_thermal), levelLabel(it)) }
         }
-        ExperimentStatusRow(stringResource(R.string.mac_gateway_memory), levelLabel(health.memoryPressure))
-        ExperimentStatusRow(stringResource(R.string.mac_gateway_thermal), levelLabel(health.thermal))
     }
 }
 
 @Composable
 internal fun TasksSection(
     sessions: List<MacGatewayStatus.Session>,
-    synaraURL: String?,
     busy: Boolean = false,
     onMonitoredChange: (MacGatewayStatus.Session, Boolean) -> Unit,
     onDecision: (MacGatewayStatus.Session, MacGatewayStatus.PendingApproval, Boolean) -> Unit = { _, _, _ -> },
 ) {
     val workspace = workspaceColors()
-    val context = LocalContext.current
     ExperimentSectionCard(title = stringResource(R.string.mac_gateway_section_tasks)) {
-        if (synaraURL != null) {
-            ExperimentActionRow {
-                ExperimentActionButton(stringResource(R.string.mac_gateway_open_synara), enabled = true, primary = true) {
-                    // Straight to the browser: the app's openUrl helper logs the URL, which carries the Synara gate secret.
-                    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(synaraURL))) }
-                }
-            }
-        }
         if (sessions.isEmpty()) {
             ExperimentNote(stringResource(R.string.mac_gateway_no_tasks))
             return@ExperimentSectionCard
@@ -515,14 +602,13 @@ internal fun TasksSection(
                             )
                         }
                     }
-                    Switch(checked = session.monitored, onCheckedChange = { onMonitoredChange(session, it) })
+                    Switch(checked = session.monitored, enabled = !busy, onCheckedChange = { onMonitoredChange(session, it) })
                 }
                 session.pendingApproval?.let { approval ->
                     PendingApprovalCard(
-                        session = session,
                         approval = approval,
                         busy = busy,
-                        onDecision = onDecision,
+                        onDecision = { allow -> onDecision(session, approval, allow) },
                     )
                 }
             }
@@ -532,11 +618,10 @@ internal fun TasksSection(
 }
 
 @Composable
-private fun PendingApprovalCard(
-    session: MacGatewayStatus.Session,
+internal fun PendingApprovalCard(
     approval: MacGatewayStatus.PendingApproval,
     busy: Boolean,
-    onDecision: (MacGatewayStatus.Session, MacGatewayStatus.PendingApproval, Boolean) -> Unit,
+    onDecision: (Boolean) -> Unit,
 ) {
     val workspace = workspaceColors()
     val scheme = MaterialTheme.colorScheme
@@ -692,7 +777,7 @@ private fun PendingApprovalCard(
                     primary = false,
                     danger = localApprovalOnly,
                 ) {
-                    onDecision(session, approval, false)
+                    onDecision(false)
                 }
                 if (!localApprovalOnly) {
                     ExperimentActionButton(
@@ -700,7 +785,7 @@ private fun PendingApprovalCard(
                         enabled = !busy,
                         primary = true,
                     ) {
-                        onDecision(session, approval, true)
+                        onDecision(true)
                     }
                 }
             }
@@ -806,16 +891,24 @@ private fun Context.clipboardText(): String =
         ?.takeIf { it.itemCount > 0 }
         ?.getItemAt(0)?.coerceToText(this)?.toString().orEmpty()
 
-private fun Throwable.describe(context: Context): String = when (this) {
-    is MacGatewayException.Unreachable -> context.getString(R.string.mac_gateway_error_unreachable)
-    is MacGatewayException.CertificateMismatch -> context.getString(R.string.mac_gateway_error_certificate)
-    is MacGatewayException.Unauthorized -> context.getString(R.string.mac_gateway_error_unauthorized)
+internal fun Throwable.describe(context: Context): String = when (this) {
+    is MacGatewayException.Unreachable -> context.getString(R.string.amber_multi_device_unreachable)
+    is MacGatewayException.CertificateMismatch -> context.getString(R.string.amber_multi_device_certificate)
+    is MacGatewayException.Unauthorized -> context.getString(R.string.amber_multi_device_unauthorized)
+    is MacGatewayException.Conflict -> when (code) {
+        "wrong_endpoint_role" -> context.getString(R.string.amber_multi_device_wrong_role)
+        "gateway_in_other_slot" -> context.getString(R.string.amber_multi_device_already_paired)
+        "gateway_pairing_changed" -> context.getString(R.string.amber_multi_device_pairing_changed)
+        "schedule_changed", "gateway_approval_changed" -> context.getString(R.string.mac_gateway_task_changed)
+        else -> code
+    }
     is MacGatewayException.Forbidden -> if (requiresLocalApproval) {
         context.getString(R.string.mac_gateway_approval_high_risk_hint)
     } else {
         code
     }
     is MacGatewayException.InvalidResponse -> context.getString(R.string.mac_gateway_error_invalid_response)
+    is MacGatewayException.MutationUnconfirmed -> context.getString(R.string.mac_gateway_schedule_unconfirmed)
     is MacGatewayException.Server -> message.orEmpty()
     else -> context.getString(R.string.mac_gateway_error_generic, message ?: javaClass.simpleName)
 }

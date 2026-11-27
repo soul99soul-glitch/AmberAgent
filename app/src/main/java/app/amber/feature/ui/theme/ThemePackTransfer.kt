@@ -18,7 +18,9 @@ import java.util.UUID
 
 /** iOS's existing v1 file is the interchange format. Legacy Android packages remain readable. */
 object ThemePackTransfer {
-    val builtinIds = setOf("builtin:WARM", "builtin:SAGE", "sit-terracotta", "pi-steel", "notion-blue")
+    /** Whole recipes shown beside the default dot-grid theme. */
+    val builtinPackIds = listOf("pi-steel", "notion-blue") + AmberArquielThemePresets.all.map { it.id }
+    val builtinIds = setOf("builtin:WARM", "builtin:SAGE", "sit-terracotta") + builtinPackIds
     private val wireJson = Json(JsonInstant) { explicitNulls = false; prettyPrint = true }
 
     fun encode(document: ThemePackDocument): String = wireJson.encodeToString(ThemePackDocument.serializer(), document)
@@ -92,9 +94,6 @@ object ThemePackTransfer {
         document = document,
     )
 
-    /** Whole-recipe presets shown beside 点阵 · 陶土 (the default WARM family); same recipes as iOS. */
-    val builtinPackIds = listOf("pi-steel", "notion-blue")
-
     fun builtin(id: String): ThemePackDocument? = when (id) {
         "builtin:WARM" -> export(DisplaySetting()).copy(id = id, displayName = "点阵 · 陶土")
         "builtin:SAGE" -> export(DisplaySetting(amberBaseFamily = "SAGE")).copy(id = id, displayName = "鼠尾草")
@@ -118,7 +117,7 @@ object ThemePackTransfer {
             emptyArt = "none", settingsChrome = false, launchBrand = "none",
             assetMode = "builtinOnly", immersivePolicy = "hidden",
         )
-        else -> null
+        else -> AmberArquielThemePresets.all.firstOrNull { it.id == id }
     }
 
     private val argumentNames = mapOf(

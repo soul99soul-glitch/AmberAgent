@@ -38,11 +38,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.amber.ai.provider.Model
 import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.CodeXml
 import com.composables.icons.lucide.LayoutDashboard
 import com.composables.icons.lucide.Globe
 import com.composables.icons.lucide.Laptop
-import com.composables.icons.lucide.Newspaper
 import com.composables.icons.lucide.Server
 import com.composables.icons.lucide.Users
 import app.amber.agent.R
@@ -95,13 +93,6 @@ fun SettingExperimentalPage() {
                     )
                     ExperimentDivider()
                     ExperimentFeatureRow(
-                        onClick = { navController.navigate(Screen.SettingTodayBoard) },
-                        icon = { Icon(Lucide.Newspaper, contentDescription = null) },
-                        title = stringResource(R.string.notification_channel_today_board),
-                        description = stringResource(R.string.setting_experimental_today_board_desc),
-                    )
-                    ExperimentDivider()
-                    ExperimentFeatureRow(
                         onClick = { navController.navigate(Screen.MiniAppSettings) },
                         icon = { Icon(Lucide.LayoutDashboard, contentDescription = null) },
                         title = stringResource(R.string.session_home_feature_mini_apps),
@@ -109,24 +100,10 @@ fun SettingExperimentalPage() {
                     )
                     ExperimentDivider()
                     ExperimentFeatureRow(
-                        onClick = { navController.navigate(Screen.SynaraCompanion) },
-                        icon = { Icon(Lucide.Server, contentDescription = null) },
-                        title = "Synara",
-                        description = stringResource(R.string.setting_experimental_synara_desc),
-                    )
-                    ExperimentDivider()
-                    ExperimentFeatureRow(
                         onClick = { navController.navigate(Screen.SettingExperimentalMacGateway) },
                         icon = { Icon(Lucide.Laptop, contentDescription = null) },
                         title = "Mac Gateway",
                         description = stringResource(R.string.mac_gateway_desc_short),
-                    )
-                    ExperimentDivider()
-                    ExperimentFeatureRow(
-                        onClick = { navController.navigate(Screen.ZCode) },
-                        icon = { Icon(Lucide.CodeXml, contentDescription = null) },
-                        title = "ZCode",
-                        description = stringResource(R.string.setting_experimental_zcode_desc),
                     )
                     // Model Council top-level entry removed — it's now reachable from inside the
                     // SubAgent settings page as an "advanced" section (it's effectively a

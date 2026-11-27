@@ -221,7 +221,11 @@ private fun themeStatusPayload(status: ThemePackageStatus, base: ThemePackDocume
     put("base", ThemePackTransfer.toolPayload(base))
     put("format", "amber.theme.pack")
     put("version", 1)
-    put("builtin_ids", buildJsonArray { add("builtin:WARM"); add("builtin:SAGE") })
+    put("builtin_ids", buildJsonArray {
+        add("builtin:WARM")
+        add("builtin:SAGE")
+        ThemePackTransfer.builtinPackIds.forEach(::add)
+    })
     put("installed_ids", buildJsonArray { status.installed.forEach { add(it.id) } })
     put("design_schema", designProperty())
     put("preserved_only", buildJsonArray {

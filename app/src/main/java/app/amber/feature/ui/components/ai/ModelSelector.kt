@@ -14,11 +14,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
@@ -28,6 +28,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -39,13 +42,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.util.fastAny
-import androidx.compose.ui.util.fastFilter
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import app.amber.ai.provider.Modality
@@ -88,7 +90,6 @@ fun ModelSelector(
     onSelect: (Model) -> Unit
 ) {
     var popup by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
     val visibleProviders = providers
     val model = if ((customTrigger != null && !onlyIcon) || modelId == null) {
         null
@@ -277,95 +278,149 @@ fun ModelSelector(
     }
 
     if (popup) {
-        val settingsStore: SettingsAggregator = koinInject()
-        val settings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
-        val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-        val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
-        val tokens = LocalAmberTokens.current
-        val filteredProviderSettings = remember(visibleProviders, type) {
-            visibleProviders.fastFilter {
-                it.enabled && it.models.fastAny { model -> model.type == type }
+        ModelPickerSheet(
+            modelId = modelId,
+            providers = visibleProviders,
+            type = type,
+            preferredInputModality = preferredInputModality,
+            onSelect = onSelect,
+            onDismiss = { popup = false },
+        )
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+internal fun ModelPickerSheet(
+    modelId: Uuid?,
+    providers: List<ProviderSetting>,
+    type: ModelType,
+    onSelect: (Model) -> Unit,
+    onDismiss: () -> Unit,
+    preferredInputModality: Modality? = null,
+    allowPartialExpansion: Boolean = false,
+    header: (@Composable () -> Unit)? = null,
+    footer: (@Composable () -> Unit)? = null,
+) {
+    val settingsStore: SettingsAggregator = koinInject()
+    val settings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
+    val state = rememberModalBottomSheetState(skipPartiallyExpanded = !allowPartialExpansion)
+    val scope = rememberCoroutineScope()
+    val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
+    val tokens = LocalAmberTokens.current
+    val availableProviders = remember(providers, type) {
+        val enabledProviders = providers.filter { it.enabled }
+        val visibleModels = enabledProviders.pickerModelsByProvider(type, preferredInputModality = null)
+        enabledProviders.filter { visibleModels[it.id].orEmpty().isNotEmpty() }
+    }
+    var closing by remember { mutableStateOf(false) }
+    fun close(selectedModel: Model? = null) {
+        if (closing) return
+        closing = true
+        selectedModel?.let(onSelect)
+        scope.launch {
+            try {
+                state.hide()
+                onDismiss()
+            } finally {
+                closing = false
             }
         }
-        // Selector shell follows the raised sheet/card treatment in the model
-        // picker reference; search and favorites remain available to callers.
-        ModalBottomSheet(
-            onDismissRequest = { popup = false },
-            sheetState = state,
-            shape = androidx.compose.foundation.shape.RoundedCornerShape(
-                topStart = 22.dp,
-                topEnd = 22.dp,
-                bottomStart = 0.dp,
-                bottomEnd = 0.dp,
-            ),
-            containerColor = tokens.raised,
-            scrimColor = chatTheme.sheetBackdrop,
-            dragHandle = {
-                Box(
-                    modifier = Modifier
-                        .padding(top = 10.dp, bottom = 4.dp)
-                        .width(36.dp)
-                        .height(4.dp)
-                        .background(tokens.line2),
-                )
-            },
-        ) {
-            Column(
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = state,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        containerColor = tokens.bg,
+        contentColor = tokens.ink,
+        scrimColor = Color.Black.copy(alpha = if (tokens.isDark) 0.48f else 0.22f),
+        dragHandle = {
+            Box(
                 modifier = Modifier
-                    .fillMaxHeight(0.7f)
-                    .imePadding(),
+                    .padding(top = 10.dp, bottom = 10.dp)
+                    .width(36.dp)
+                    .height(4.dp)
+                    .background(tokens.ink3.copy(alpha = 0.36f), CircleShape),
+            )
+        },
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxHeight(if (allowPartialExpansion) 1f else 0.7f)
+                .testTag("model-picker-sheet"),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp)
+                    .padding(bottom = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
-                        .padding(top = 8.dp, bottom = 4.dp),
+                    modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     Text(
                         text = stringResource(R.string.model_list_select_model),
-                        style = LocalAmberType.current.screenTitle,
+                        style = LocalAmberType.current.screenTitle.copy(fontSize = 18.sp, lineHeight = 24.sp),
                         color = tokens.ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
-                    Text(
-                        text = stringResource(
-                            when (type) {
-                                ModelType.CHAT -> R.string.setting_model_page_chat_model
-                                ModelType.IMAGE -> R.string.setting_model_page_image_gen_model
-                                ModelType.EMBEDDING -> R.string.setting_provider_page_embedding_model
-                            }
-                        ),
-                        style = LocalAmberType.current.meta.copy(fontSize = 12.sp),
-                        color = tokens.ink3,
-                    )
+                    if (!allowPartialExpansion) {
+                        Text(
+                            text = stringResource(
+                                when (type) {
+                                    ModelType.CHAT -> R.string.setting_model_page_chat_model
+                                    ModelType.IMAGE -> R.string.setting_model_page_image_gen_model
+                                    ModelType.EMBEDDING -> R.string.setting_provider_page_embedding_model
+                                }
+                            ),
+                            style = LocalAmberType.current.meta.copy(fontSize = 12.sp, lineHeight = 16.sp),
+                            color = tokens.ink3,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
                 }
-                // ── Search field lives inside ModelList (it owns searchKeywords) ──
-                ModelList(
-                    currentModel = modelId,
-                    providers = filteredProviderSettings,
-                    modelType = type,
-                    preferredInputModality = preferredInputModality,
-                    favoriteModelIds = settings.favoriteModels,
-                    onFavoriteModelsChange = { ids ->
-                        scope.launch {
-                            settingsStore.update { current -> current.copy(favoriteModels = ids) }
-                        }
-                    },
-                    onSelect = { selectedModel ->
-                        onSelect(selectedModel)
-                        scope.launch {
-                            state.hide()
-                            popup = false
-                        }
-                    },
-                    onDismiss = {
-                        scope.launch {
-                            state.hide()
-                            popup = false
-                        }
-                    },
-                )
+                if (allowPartialExpansion) {
+                    val closeA11y = stringResource(R.string.chat_page_close)
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .clickable(role = Role.Button, onClick = { close() })
+                            .semantics { contentDescription = closeA11y },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Lucide.X,
+                            contentDescription = null,
+                            tint = tokens.ink3,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
             }
+            HorizontalDivider(thickness = 0.5.dp, color = tokens.line)
+            header?.invoke()
+            ModelList(
+                currentModel = modelId,
+                providers = availableProviders,
+                modelType = type,
+                preferredInputModality = preferredInputModality,
+                favoriteModelIds = settings.favoriteModels,
+                onFavoriteModelsChange = { ids ->
+                    scope.launch {
+                        settingsStore.update { current -> current.copy(favoriteModels = ids) }
+                    }
+                },
+                onSelect = { close(it) },
+                onDismiss = { close() },
+            )
+            footer?.invoke()
         }
     }
 }

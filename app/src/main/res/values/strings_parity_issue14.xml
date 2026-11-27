@@ -75,13 +75,6 @@
     <string name="setting_provider_page_capabilities">Capabilities</string>
     <string name="setting_provider_page_vision">Vision</string>
 
-    <!-- Novel workspace -->
-    <string name="novel_writing_model">Writing model</string>
-    <string name="novel_models_section">Models</string>
-    <string name="novel_chapters_section">Chapters</string>
-    <string name="novel_chapter_title">Chapter title</string>
-    <string name="novel_draft">Draft</string>
-    <string name="novel_project_ghostwrite_running">A ghostwrite batch is still running for this project; finish or cancel it before deleting</string>
 
     <!-- Debug / Developer / Log -->
     <string name="debug_avatar_editor">Avatar editor</string>
@@ -120,10 +113,6 @@
     <string name="session_home_message_count">%1$s messages</string>
 
     <!-- Board -->
-    <string name="deep_read_template_custom_empty">No custom templates yet</string>
-    <string name="deep_read_template_custom_empty_hint">Created templates will appear here</string>
-    <string name="board_pull_to_refresh">Pull to refresh</string>
-    <string name="board_custom_sources_empty">No custom sources yet</string>
 
     <!-- Shortcuts / Council -->
     <string name="shortcut_new_chat">New chat</string>
@@ -157,18 +146,6 @@
     <string name="model_council_role_risk">Risk</string>
 
     <!-- NewsNow preset display names (persisted English defaults) -->
-    <string name="board_newsnow_preset_zhihu">Zhihu Hot</string>
-    <string name="board_newsnow_preset_weibo">Weibo Hot Search</string>
-    <string name="board_newsnow_preset_douyin">Douyin Hot Search</string>
-    <string name="board_newsnow_preset_coolapk">Coolapk</string>
-    <string name="board_newsnow_preset_bilibili">Bilibili Hot Search</string>
-    <string name="board_newsnow_preset_v2ex">V2EX Share</string>
-    <string name="board_newsnow_preset_github">GitHub Trending</string>
-    <string name="board_newsnow_preset_36kr">36Kr Flash</string>
-    <string name="board_newsnow_preset_hupu">Hupu Street</string>
-    <string name="board_newsnow_preset_xueqiu">Xueqiu Hot Stocks</string>
-    <string name="board_newsnow_preset_wallstreet">Wallstreetcn Hot</string>
-    <string name="board_newsnow_preset_cls">CLS Telegraph</string>
 
     <!-- Antigravity / Grok OAuth library errors (app-layer wrappers may also use these) -->
     <string name="antigravity_oauth_stale_session">Antigravity OAuth session changed; discarded stale response. Please retry.</string>

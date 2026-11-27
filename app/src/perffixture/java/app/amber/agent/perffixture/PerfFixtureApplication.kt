@@ -15,14 +15,12 @@ import app.amber.ai.ui.UIMessagePart
 import app.amber.core.di.agentInfraModule
 import app.amber.core.di.agentRuntimeModule
 import app.amber.core.di.appModule
-import app.amber.core.di.boardModule
 import app.amber.core.di.chatModule
 import app.amber.core.di.dataSourceModule
 import app.amber.core.di.generationModule
 import app.amber.core.di.iCloudModule
 import app.amber.core.di.jevModule
 import app.amber.core.di.memoryModule
-import app.amber.core.di.novelModule
 import app.amber.core.di.repositoryModule
 import app.amber.core.di.toolExecutionModule
 import app.amber.core.di.viewModelModule
@@ -84,7 +82,7 @@ class PerfFixtureApplication : Application() {
             androidContext(this@PerfFixtureApplication)
             modules(
                 appModule, chatModule, memoryModule, iCloudModule, webMountModule,
-                agentRuntimeModule, agentInfraModule, boardModule, workspaceModule, novelModule,
+                agentRuntimeModule, agentInfraModule, workspaceModule,
                 viewModelModule, dataSourceModule, generationModule, toolExecutionModule,
                 repositoryModule, jevModule,
                 module {

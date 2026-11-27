@@ -1,41 +1,54 @@
 package app.amber.feature.ui.components.ai
 
 import androidx.compose.foundation.LocalIndication
-import androidx.compose.foundation.border
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ProviderSetting
-import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Check
-import com.composables.icons.lucide.ArrowRight
+import com.composables.icons.lucide.ChevronRight
 import com.composables.icons.lucide.Heart
+import com.composables.icons.lucide.Lucide
 import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.feature.ui.components.ui.icons.HeartIcon
@@ -45,6 +58,63 @@ import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.feature.ui.pages.setting.components.providerSlugLabel
 import app.amber.core.utils.formatNumber
+
+private val PickerGroupCorner = 16.dp
+
+/**
+ * Draws only the exterior edges of a grouped card segment so adjacent LazyColumn items merge
+ * into one continuous card with a single 0.5dp hairline outline and zero doubled inner borders.
+ */
+private fun Modifier.pickerGroupOutline(
+    isFirst: Boolean,
+    isLast: Boolean,
+    borderColor: Color,
+    cornerRadius: Dp = PickerGroupCorner,
+): Modifier = drawWithContent {
+    drawContent()
+    val strokePx = 0.5.dp.toPx()
+    val half = strokePx / 2f
+    val w = size.width
+    val h = size.height
+    val r = cornerRadius.toPx().coerceAtMost(minOf(w, h) / 2f)
+    when {
+        isFirst && isLast -> {
+            drawRoundRect(
+                color = borderColor,
+                topLeft = Offset(half, half),
+                size = Size(w - strokePx, h - strokePx),
+                cornerRadius = CornerRadius(r, r),
+                style = Stroke(strokePx),
+            )
+        }
+        isFirst -> {
+            val path = Path().apply {
+                moveTo(half, h)
+                lineTo(half, half + r)
+                arcTo(Rect(half, half, half + 2 * r, half + 2 * r), 180f, 90f, false)
+                lineTo(w - half - r, half)
+                arcTo(Rect(w - half - 2 * r, half, w - half, half + 2 * r), 270f, 90f, false)
+                lineTo(w - half, h)
+            }
+            drawPath(path, color = borderColor, style = Stroke(strokePx))
+        }
+        isLast -> {
+            val path = Path().apply {
+                moveTo(half, 0f)
+                lineTo(half, h - half - r)
+                arcTo(Rect(half, h - half - 2 * r, half + 2 * r, h - half), 180f, -90f, false)
+                lineTo(w - half - r, h - half)
+                arcTo(Rect(w - half - 2 * r, h - half - 2 * r, w - half, h - half), 90f, -90f, false)
+                lineTo(w - half, 0f)
+            }
+            drawPath(path, color = borderColor, style = Stroke(strokePx))
+        }
+        else -> {
+            drawLine(borderColor, Offset(half, 0f), Offset(half, h), strokePx)
+            drawLine(borderColor, Offset(w - half, 0f), Offset(w - half, h), strokePx)
+        }
+    }
+}
 
 @Composable
 internal fun PickerProviderHeader(
@@ -57,49 +127,63 @@ internal fun PickerProviderHeader(
 ) {
     val t = LocalAmberTokens.current
     val type = LocalAmberType.current
-    val accent = app.amber.feature.ui.pages.chat.LocalChatTheme.current.accent
     val shape = RoundedCornerShape(
-        topStart = if (showTopCorners) 14.dp else 0.dp,
-        topEnd = if (showTopCorners) 14.dp else 0.dp,
-        bottomStart = if (expanded) 0.dp else 14.dp,
-        bottomEnd = if (expanded) 0.dp else 14.dp,
+        topStart = if (showTopCorners) PickerGroupCorner else 0.dp,
+        topEnd = if (showTopCorners) PickerGroupCorner else 0.dp,
+        bottomStart = if (expanded) 0.dp else PickerGroupCorner,
+        bottomEnd = if (expanded) 0.dp else PickerGroupCorner,
     )
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
             .background(t.surface)
-            .border(1.dp, t.line.copy(alpha = 0.42f), shape)
-            .pressable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 13.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+            .pickerGroupOutline(isFirst = showTopCorners, isLast = !expanded, borderColor = t.line),
     ) {
-        Text(
-            text = provider.providerSlugLabel(),
-            style = type.meta.copy(
-                fontSize = 13.sp,
-                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
-            ),
-            color = if (active) accent else t.ink,
-            modifier = Modifier.weight(1f),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-        Text(
-            text = modelCount.toString(),
-            style = type.meta.copy(fontSize = 11.sp, fontFeatureSettings = "tnum"),
-            color = t.ink3,
-            maxLines = 1,
-        )
-        Icon(
-            imageVector = Lucide.ArrowRight,
-            contentDescription = null,
-            tint = t.ink3,
+        Row(
             modifier = Modifier
-                .size(18.dp)
-                .graphicsLayer { rotationZ = if (expanded) 90f else 0f },
-        )
+                .fillMaxWidth()
+                .pressable(onClick = onClick)
+                .padding(horizontal = 16.dp, vertical = 13.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = provider.providerSlugLabel(),
+                style = type.body.copy(
+                    fontSize = 13.5.sp,
+                    lineHeight = 19.sp,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+                color = if (active) t.accent else t.ink2,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = modelCount.toString(),
+                style = type.meta.copy(fontSize = 11.sp, fontFeatureSettings = "tnum"),
+                color = t.ink4,
+                maxLines = 1,
+            )
+            Icon(
+                imageVector = Lucide.ChevronRight,
+                contentDescription = null,
+                tint = t.ink4,
+                modifier = Modifier
+                    .size(15.dp)
+                    .graphicsLayer { rotationZ = if (expanded) 90f else 0f },
+            )
+        }
+        if (expanded) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .height(0.5.dp)
+                    .background(t.line.copy(alpha = 0.72f)),
+            )
+        }
     }
 }
 
@@ -113,18 +197,21 @@ internal fun PickerModelRow(
     isLast: Boolean,
     favorite: Boolean,
     onToggleFavorite: () -> Unit,
+    isFirst: Boolean = false,
 ) {
     val t = LocalAmberTokens.current
     val shape = RoundedCornerShape(
-        bottomStart = if (isLast) 14.dp else 0.dp,
-        bottomEnd = if (isLast) 14.dp else 0.dp,
+        topStart = if (isFirst) PickerGroupCorner else 0.dp,
+        topEnd = if (isFirst) PickerGroupCorner else 0.dp,
+        bottomStart = if (isLast) PickerGroupCorner else 0.dp,
+        bottomEnd = if (isLast) PickerGroupCorner else 0.dp,
     )
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(shape)
             .background(t.surface)
-            .border(1.dp, t.line.copy(alpha = 0.42f), shape),
+            .pickerGroupOutline(isFirst = isFirst, isLast = isLast, borderColor = t.line),
     ) {
         ModelItemRow(
             model = model,
@@ -132,8 +219,11 @@ internal fun PickerModelRow(
             isActive = isActive,
             onSelect = onSelect,
             onDismiss = onDismiss,
-            startPadding = 14.dp,
-            endPadding = 2.dp,
+            modelFontSize = 14.5.sp,
+            contextFontSize = 11.sp,
+            verticalPadding = 7.dp,
+            startPadding = 16.dp,
+            endPadding = 8.dp,
             tail = {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -144,7 +234,7 @@ internal fun PickerModelRow(
                             imageVector = Lucide.Check,
                             contentDescription = null,
                             tint = t.accent,
-                            modifier = Modifier.size(18.dp),
+                            modifier = Modifier.size(15.dp),
                         )
                     }
                     FavoriteToggleIcon(
@@ -159,8 +249,9 @@ internal fun PickerModelRow(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(1.dp)
-                    .background(t.line),
+                    .padding(horizontal = 16.dp)
+                    .height(0.5.dp)
+                    .background(t.line.copy(alpha = 0.65f)),
             )
         }
     }
@@ -189,6 +280,7 @@ internal fun ModelItem(
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .semantics { selected = select }
             .combinedClickable(
                 enabled = true,
                 onLongClick = {
@@ -274,6 +366,7 @@ internal fun ModelItemRow(
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         modifier = Modifier
             .fillMaxWidth()
+            .semantics { selected = isActive }
             .combinedClickable(
                 enabled = true,
                 onLongClick = {
@@ -290,11 +383,12 @@ internal fun ModelItemRow(
     ) {
         Text(
             text = model.displayName,
-            style = LocalAmberType.current.meta.copy(
+            style = LocalAmberType.current.body.copy(
                 fontSize = modelFontSize,
-                fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
+                lineHeight = 20.sp,
+                fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
             ),
-            color = if (isActive) chatTheme.accent else chatTheme.ink,
+            color = if (isActive) tokens.accent else tokens.ink,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
@@ -304,9 +398,10 @@ internal fun ModelItemRow(
                 text = ctx.formatNumber(),
                 style = LocalAmberType.current.meta.copy(
                     fontSize = contextFontSize,
+                    lineHeight = 14.sp,
                     fontFeatureSettings = "tnum",
                 ),
-                color = tokens.ink3,
+                color = tokens.ink4,
                 maxLines = 1,
                 textAlign = androidx.compose.ui.text.style.TextAlign.End,
                 modifier = Modifier.width(contextWidth),
@@ -316,25 +411,31 @@ internal fun ModelItemRow(
     }
 }
 
-/** 收藏图标 —— 主题色感知的心形 */
+/** 收藏图标 —— 轻线心形，保持舒适点击热区同时降低列表视觉噪声 */
 @Composable
 private fun FavoriteToggleIcon(
     favorite: Boolean,
     isActive: Boolean,
     onToggle: () -> Unit,
 ) {
-    val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
-    IconButton(onClick = onToggle) {
+    val tokens = LocalAmberTokens.current
+    val desc = stringResource(if (favorite) R.string.favorite_remove else R.string.favorite_add)
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .clickable(role = Role.Button, onClick = onToggle)
+            .semantics { contentDescription = desc },
+        contentAlignment = Alignment.Center,
+    ) {
         Icon(
             imageVector = if (favorite) HeartIcon else Lucide.Heart,
-            contentDescription = stringResource(
-                if (favorite) R.string.favorite_remove else R.string.favorite_add
-            ),
-            modifier = Modifier.size(20.dp),
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
             tint = when {
-                favorite -> chatTheme.accent
-                isActive -> chatTheme.accent
-                else -> chatTheme.inkSoft
+                favorite -> tokens.accent
+                isActive -> tokens.accent.copy(alpha = 0.72f)
+                else -> tokens.ink4.copy(alpha = 0.78f)
             },
         )
     }

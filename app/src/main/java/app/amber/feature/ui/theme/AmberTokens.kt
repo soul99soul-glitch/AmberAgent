@@ -3,6 +3,7 @@ package app.amber.feature.ui.theme
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toArgb
 import app.amber.core.settings.ThemeDesign
@@ -110,6 +111,16 @@ val AmberAccents: List<AmberAccent> = listOf(
 fun accentInkFor(accent: Color): Color {
     val rgb = accent.toArgb() and 0xFFFFFF
     return if (themeContrast(rgb, 0x000000) >= themeContrast(rgb, 0xFFFFFF)) Color.Black else Color.White
+}
+
+/** Keep the recipe's accent for brand and bubble fills, with a readable tint for controls. */
+internal fun AmberTokens.readableControlAccent(): Color {
+    val backgrounds = listOf(bg, surface, accent.copy(alpha = 0.22f).compositeOver(surface)).map(Color::toArgb)
+    for (step in 0..10) {
+        val candidate = lerp(accent, ink, step / 10f)
+        if (backgrounds.all { themeContrast(candidate.toArgb(), it) >= 4.5 }) return candidate
+    }
+    return ink
 }
 
 /**

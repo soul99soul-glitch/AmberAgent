@@ -154,15 +154,11 @@ fun capabilityForTool(name: String): Capability? = when (name) {
     // ---- filesystem.read: workspace / external file reads ----
     "file_list", "file_read", "file_search", "pdf_read", "office_read",
     "image_info", "ocr_image", "archive_list", "external_file_read",
-    "deep_read_playbook_read",
     -> Capability.FILESYSTEM_READ
 
     // ---- filesystem.write: file mutations (incl. downloads that write) ----
     "file_write", "file_edit", "file_move", "archive_create", "archive_extract",
     "image_convert", "external_file_write", "download_file", "pdf_render_page",
-    "deep_read_write_analysis", "deep_read_write_diagram", "deep_read_write_extended_reading",
-    "deep_read_write_narrative", "deep_read_write_overview", "deep_read_write_visuals",
-    "deep_read_playbook_update", "deep_read_playbook_restore_default", "deep_read_playbook_restore_previous",
     -> Capability.FILESYSTEM_WRITE
 
     // ---- workspace.delete: destructive file removal ----
@@ -178,7 +174,7 @@ fun capabilityForTool(name: String): Capability? = when (name) {
     "wm_tab_close", "wm_back", "wm_forward", "wm_scroll", "wm_find", "wm_network_inspect",
     "wm_stations", "wm_recipe_candidates", "wm_signed_fetch", "wm_extract", "wm_site_add",
     "wm_site_remove", "wm_profile_synthesize", "wm_click", "wm_tap", "wm_type", "wm_keys",
-    "wm_select", "wm_eval", "wm_zcode_open", "wm_zcode_read", "wm_zcode_ask", "wm_run_goal",
+    "wm_select", "wm_eval", "wm_run_goal",
     -> Capability.NETWORK_CONNECT
 
     // ---- mcp.import: configure / import / test MCP server connections ----

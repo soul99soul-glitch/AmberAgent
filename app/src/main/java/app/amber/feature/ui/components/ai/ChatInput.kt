@@ -1,10 +1,13 @@
 package app.amber.feature.ui.components.ai
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -15,7 +18,11 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.Color
+import app.amber.feature.ui.components.ds.AmberGlassRole
+import app.amber.feature.ui.components.ds.amberGlass
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.indication
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -23,21 +30,27 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imeAnimationTarget
 import androidx.compose.foundation.layout.isImeVisible
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -53,10 +66,17 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.CoroutineStart
@@ -64,9 +84,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import app.amber.ai.core.ReasoningLevel
 import app.amber.ai.provider.Model
 import app.amber.ai.provider.ProviderCatalog
 import app.amber.ai.ui.UIMessagePart
+import app.amber.core.settings.defaultReasoningLevelForModel
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.Plus
 import com.composables.icons.lucide.ArrowUp
@@ -92,6 +114,7 @@ import app.amber.feature.ui.components.ui.permission.rememberPermissionState
 import app.amber.feature.ui.components.webmount.WebMountTaskCard
 import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.hooks.ChatInputAttachmentImportStatus
 import app.amber.feature.ui.hooks.ChatInputState
@@ -117,6 +140,7 @@ fun nextExpandState(current: ExpandState, target: ExpandState): ExpandState =
  */
 fun composerSendEnabled(isEmpty: Boolean, loading: Boolean): Boolean = loading || !isEmpty
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun ChatInput(
     state: ChatInputState,
@@ -140,10 +164,19 @@ internal fun ChatInput(
     onDismissWebMount: () -> Unit = {},
     onOpenWebMountSession: (sessionId: String, reopen: Boolean) -> Unit = { _, _ -> },
     aboveComposerContent: @Composable () -> Unit = {},
-    belowComposerContent: @Composable (imeVisible: Boolean) -> Unit = {},
+    belowComposerContent: @Composable () -> Unit = {},
     duetStyle: Boolean = false,
     modifier: Modifier = Modifier,
-    onUpdateChatModel: (Model) -> Unit,
+    currentChatModel: Model?,
+    onOpenModelPicker: (() -> Unit)?,
+    modelPickerOpen: Boolean,
+    modelPickerTransitioning: Boolean = false,
+    keyboardDismissRequested: Boolean = false,
+    modeOverlayOpen: Boolean = false,
+    inputFocused: Boolean,
+    onInputFocusChanged: (Boolean) -> Unit,
+    focusRequester: FocusRequester? = null,
+    onSelectReasoningLevel: (Uuid, ReasoningLevel) -> Unit = { _, _ -> },
     onUpdateSettings: (Settings) -> Unit,
     onUpdateSearchService: (Int) -> Unit,
     onCancelClick: () -> Unit,
@@ -175,9 +208,39 @@ internal fun ChatInput(
 
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
+    val density = LocalDensity.current
     val imeVisible = WindowInsets.isImeVisible
+    val imeTargetVisible = WindowInsets.imeAnimationTarget.getBottom(density) > 0
+    var sawImeTargetPositive by remember(conversation.id) { mutableStateOf(false) }
+    var wasImeVisible by remember(conversation.id) { mutableStateOf(false) }
+    var activeFocusPopover by remember(conversation.id) { mutableStateOf<ComposerFocusPopover?>(null) }
     var expand by remember { mutableStateOf(ExpandState.Collapsed) }
     var keepPlaceholderHiddenDuringAttachmentExit by remember { mutableStateOf(false) }
+    var showUsageSheet by remember { mutableStateOf(false) }
+
+    LaunchedEffect(imeTargetVisible) {
+        if (imeTargetVisible) {
+            sawImeTargetPositive = true
+        }
+    }
+    LaunchedEffect(modeOverlayOpen, modelPickerOpen, modelPickerTransitioning) {
+        if (modeOverlayOpen || modelPickerOpen || modelPickerTransitioning) {
+            activeFocusPopover = null
+            expand = ExpandState.Collapsed
+        }
+    }
+    LaunchedEffect(imeVisible) {
+        // NEVER call focusManager.clearFocus() while the IME hide animation is still in flight —
+        // tearing down InputConnection mid-animation aborts/stutters Android's native IME close.
+        // Instead, visually crossfade the bottom bar on frame 0 via `imeClosingForUi` below, and
+        // release TextField focus silently only after the keyboard has completely closed.
+        if (duetStyle && wasImeVisible && !imeVisible && inputFocused &&
+            activeFocusPopover == null && !modelPickerOpen && !modelPickerTransitioning && !showUsageSheet
+        ) {
+            focusManager.clearFocus()
+        }
+        wasImeVisible = imeVisible
+    }
 
     LaunchedEffect(expand) {
         if (expand == ExpandState.Files) {
@@ -257,7 +320,6 @@ internal fun ChatInput(
         }
     }
 
-    var showUsageSheet by remember { mutableStateOf(false) }
     fun dismissExpand() {
         expand = ExpandState.Collapsed
     }
@@ -336,7 +398,13 @@ internal fun ChatInput(
     val tokens = LocalAmberTokens.current
     // Continue the conversation paper under the composer and navigation inset.
     // Standard chat keeps the fine accent rule; Amber Duet Personal Agent uses a seamless floating tray.
-    Column(modifier = modifier.imePadding()) {
+    // Use a single union of IME + navigationBars so the composer stays locked 1:1 to the native IME
+    // animation edge without double-counting the navigation bar height while the keyboard is up.
+    Column(
+        modifier = modifier.windowInsetsPadding(
+            WindowInsets.ime.union(WindowInsets.navigationBars),
+        ),
+    ) {
         aboveComposerContent()
         Surface(
             color = tokens.bg,
@@ -356,9 +424,8 @@ internal fun ChatInput(
         ) {
             Column(
                 modifier = Modifier
-                    .navigationBarsPadding()
-                    // breathing room below the gesture/nav inset
-                    .padding(bottom = if (duetStyle) 8.dp else 6.dp)
+                    // breathing room below the gesture/nav inset or keyboard top edge
+                    .padding(bottom = if (duetStyle) 6.dp else 6.dp)
                     .padding(horizontal = 16.dp)
                     .padding(top = if (duetStyle) 6.dp else 10.dp),
                 // spacedBy 控制 SandboxPeekBar 与 composer pill 之间的间距。
@@ -384,7 +451,6 @@ internal fun ChatInput(
                         modifier = Modifier.align(Alignment.Start),
                     )
                 }
-
                 val pulseFraction = suggestionFillPulse.value
                 val chatTheme = app.amber.feature.ui.pages.chat.LocalChatTheme.current
                 val attachmentsExpanded = expand == ExpandState.Files
@@ -472,9 +538,24 @@ internal fun ChatInput(
                         modifier = Modifier
                             .weight(1f)
                             .heightIn(min = composerRowHeight)
-                            .clip(pillShape)
-                            .background(if (duetStyle) duetFill else tokens.surface2)
-                            .border(BorderStroke(if (duetStyle) 0.5.dp else 1.dp, pillBorder), pillShape)
+                            .then(
+                                if (duetStyle) {
+                                    Modifier
+                                        .amberGlass(pillShape, AmberGlassRole.Control)
+                                        .then(
+                                            if (pulseFraction > 0f) {
+                                                Modifier.border(BorderStroke(0.75.dp, pillBorder), pillShape)
+                                            } else {
+                                                Modifier
+                                            },
+                                        )
+                                } else {
+                                    Modifier
+                                        .clip(pillShape)
+                                        .background(tokens.surface2)
+                                        .border(BorderStroke(1.dp, pillBorder), pillShape)
+                                },
+                            )
                             .padding(
                                 start = if (duetStyle) 6.dp else 18.dp,
                                 end = 16.dp,
@@ -538,6 +619,8 @@ internal fun ChatInput(
                                 onSendMessage = { sendMessage() },
                                 onUsageClick = { showUsageSheet = true },
                                 onCompactContext = onCompactContext,
+                                onInputFocusChanged = onInputFocusChanged,
+                                focusRequester = focusRequester,
                                 modifier = Modifier.fillMaxWidth(),
                                 minimalChrome = true,
                                 hidePlaceholder = hideComposerPlaceholder,
@@ -614,13 +697,15 @@ internal fun ChatInput(
                                     scaleY = sendScale
                                 }
                                 .size(sendButtonSize)
-                                .clip(CircleShape)
-                                .background(sendFill)
                                 .then(
-                                    if (duetStyle && !sendIsActiveFill) {
-                                        Modifier.border(BorderStroke(0.5.dp, tokens.floatingOutline), CircleShape)
+                                    if (duetStyle) {
+                                        Modifier.amberGlass(
+                                            CircleShape,
+                                            AmberGlassRole.Control,
+                                            fill = if (sendIsActiveFill) sendFill else null,
+                                        )
                                     } else {
-                                        Modifier
+                                        Modifier.clip(CircleShape).background(sendFill)
                                     },
                                 ),
                             contentAlignment = Alignment.Center,
@@ -657,8 +742,125 @@ internal fun ChatInput(
                     }
                 }
 
-                belowComposerContent(imeVisible)
+                if (duetStyle) {
+                    val imeClosingForUi = keyboardDismissRequested ||
+                        (sawImeTargetPositive && imeVisible && !imeTargetVisible)
+                    val showComposerTools = !modeOverlayOpen && onOpenModelPicker != null &&
+                        (
+                            (inputFocused && !imeClosingForUi) ||
+                                modelPickerOpen ||
+                                modelPickerTransitioning ||
+                                showUsageSheet ||
+                                activeFocusPopover != null
+                        )
+                    AnimatedVisibility(visible = onOpenModelPicker != null || (!inputFocused && !imeVisible)) {
+                        AnimatedContent(
+                            targetState = showComposerTools,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp),
+                            contentAlignment = Alignment.BottomStart,
+                            transitionSpec = {
+                                (
+                                    fadeIn(tween(durationMillis = 160, easing = FastOutSlowInEasing)) togetherWith
+                                        fadeOut(tween(durationMillis = 115, easing = FastOutSlowInEasing))
+                                ).using(SizeTransform(clip = false))
+                            },
+                            label = "Personal Agent bottom controls",
+                        ) { showTools ->
+                            if (showTools && onOpenModelPicker != null) {
+                                val resolvedReasoningLevel = remember(
+                                    currentChatModel?.id,
+                                    settings.reasoningLevel,
+                                    settings.rememberedReasoningLevelsByModelId,
+                                ) {
+                                    currentChatModel?.let { model ->
+                                        settings.rememberedReasoningLevelsByModelId[model.id.toString()]
+                                            ?: if (settings.reasoningLevel == ReasoningLevel.AUTO) {
+                                                settings.defaultReasoningLevelForModel(model)
+                                            } else {
+                                                settings.reasoningLevel
+                                            }
+                                    } ?: ReasoningLevel.OFF
+                                }
+                                val reasoningState = remember(currentChatModel, resolvedReasoningLevel) {
+                                    resolveComposerReasoningState(currentChatModel, resolvedReasoningLevel)
+                                }
+                                val contextSnapshot = rememberComposerContextSnapshot(
+                                    conversation = conversation,
+                                    contextCompacts = contextCompacts,
+                                    currentChatModel = currentChatModel,
+                                )
+                                ComposerFocusToolsRow(
+                                    model = currentChatModel,
+                                    onOpenModelPicker = {
+                                        dismissExpand()
+                                        activeFocusPopover = null
+                                        onOpenModelPicker()
+                                    },
+                                    reasoningState = reasoningState,
+                                    onSelectReasoningLevel = onSelectReasoningLevel,
+                                    contextSnapshot = contextSnapshot,
+                                    compactLifecycleState = compactLifecycleState,
+                                    onCompactContext = onCompactContext,
+                                    activePopover = activeFocusPopover,
+                                    onActivePopoverChange = { next ->
+                                        dismissExpand()
+                                        activeFocusPopover = next
+                                    },
+                                )
+                            } else {
+                                belowComposerContent()
+                            }
+                        }
+                    }
+                } else if (onOpenModelPicker != null) {
+                    ChatComposerModelButton(model = currentChatModel) {
+                        dismissExpand()
+                        onOpenModelPicker()
+                    }
+                }
             }
+        }
+    }
+}
+
+@Composable
+internal fun ChatComposerModelButton(model: Model?, onClick: () -> Unit) {
+    val tokens = LocalAmberTokens.current
+    val modelLabel = model?.let { it.displayName.ifBlank { it.modelId } }?.takeIf { it.isNotBlank() }
+    val contentColor = if (modelLabel == null) tokens.accentLabel else tokens.ink2
+    val interactionSource = remember { MutableInteractionSource() }
+    val indication = androidx.compose.foundation.LocalIndication.current
+    // Separate 44dp touch target from the 34dp visual pill so it shares the exact baseline height
+    // and centerline with the thinking/context buttons, while still expanding cleanly at large text sizes.
+    Box(
+        modifier = Modifier
+            .heightIn(min = ComposerFocusToolTouchHeight)
+            .widthIn(max = 220.dp)
+            .testTag("chat-composer-model-picker")
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.Button,
+                onClick = onClick,
+            ),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Row(
+            modifier = Modifier
+                .heightIn(min = ComposerFocusToolVisualHeight)
+                .testTag("chat-composer-model-picker-visual")
+                .amberGlass(CircleShape, AmberGlassRole.Chip)
+                .indication(interactionSource, indication)
+                .padding(horizontal = 13.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = modelLabel ?: stringResource(R.string.chat_setup_choose_model),
+                style = LocalAmberType.current.secondary.copy(fontWeight = FontWeight.SemiBold),
+                color = contentColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

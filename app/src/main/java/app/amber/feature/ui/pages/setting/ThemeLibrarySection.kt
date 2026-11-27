@@ -57,6 +57,7 @@ import app.amber.feature.ui.theme.ThemePackageManager
 import app.amber.feature.ui.theme.ThemePackTransfer
 import app.amber.feature.ui.theme.ThemeTryOnHost
 import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalDarkThemePalette
 import app.amber.feature.ui.theme.SIT_TERRACOTTA_ACCENT_HEX
 import com.dokar.sonner.ToastType
 import kotlinx.coroutines.CancellationException
@@ -237,12 +238,16 @@ fun ThemeLibrarySection(
             displaySetting.appliedThemePackageId == null &&
             displaySetting.themePack == null &&
             displaySetting.accentColor.equals(SIT_TERRACOTTA_ACCENT_HEX, ignoreCase = true)
+        val darkPalette = LocalDarkThemePalette.current
+        val builtinActiveId = displaySetting.appliedThemePackageId?.takeIf { id ->
+            id in ThemePackTransfer.builtinPackIds && displaySetting.themePack == ThemePackTransfer.builtin(id)
+        }
         val cards = buildList {
             add(
                 ThemeCardModel(
                     key = "builtin:WARM",
                     name = stringResource(R.string.setting_theme_library_builtin_warm),
-                    preview = themeCardPreviewTokens(DisplaySetting(accentColor = SIT_TERRACOTTA_ACCENT_HEX)),
+                    preview = themeCardPreviewTokens(DisplaySetting(accentColor = SIT_TERRACOTTA_ACCENT_HEX), darkPalette),
                     selected = warmActive,
                     onApply = { manager.applyBuiltin("WARM") },
                 ),
@@ -252,14 +257,16 @@ fun ThemeLibrarySection(
                 add(
                     ThemeCardModel(
                         key = id,
-                        name = stringResource(
-                            if (id == "pi-steel") R.string.setting_theme_library_builtin_pi
-                            else R.string.setting_theme_library_builtin_notion,
-                        ),
+                        name = when (id) {
+                            "pi-steel" -> stringResource(R.string.setting_theme_library_builtin_pi)
+                            "notion-blue" -> stringResource(R.string.setting_theme_library_builtin_notion)
+                            else -> document.displayName
+                        },
                         preview = themeCardPreviewTokens(
                             ThemePackageApplier.applyTokens(ThemePackTransfer.asPackage(document), DisplaySetting()),
+                            darkPalette,
                         ),
-                        selected = displaySetting.appliedThemePackageId == id,
+                        selected = builtinActiveId == id,
                         onApply = { manager.applyBuiltinPack(id) },
                     ),
                 )
@@ -272,8 +279,9 @@ fun ThemeLibrarySection(
                         name = entity.name,
                         preview = themeCardPreviewTokens(
                             pkg?.let { ThemePackageApplier.applyTokens(it, DisplaySetting()) } ?: DisplaySetting(),
+                            darkPalette,
                         ),
-                        selected = displaySetting.appliedThemePackageId == entity.id,
+                        selected = displaySetting.appliedThemePackageId == entity.id && builtinActiveId != entity.id,
                         onApply = { manager.apply(entity.id) },
                         onRemove = { scope.launch { manager.remove(entity.id) } },
                     ),
@@ -311,7 +319,7 @@ fun ThemeLibrarySection(
         }
         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             TextButton(onClick = { importLauncher.launch(arrayOf("application/json", "text/plain")) }) {
-                Text(stringResource(R.string.setting_theme_library_import_title), color = LocalAmberTokens.current.accent)
+                Text(stringResource(R.string.setting_theme_library_import_title), color = MaterialTheme.colorScheme.primary)
             }
             TextButton(onClick = exportCurrent) {
                 Text(stringResource(R.string.setting_theme_library_export_current_title), color = workspace.muted)
@@ -503,11 +511,15 @@ private class ThemeCardModel(
     val onRemove: (() -> Unit)? = null,
 )
 
-/** Previews always use the theme's light recipe, like iOS, so a card reads the same in dark mode. */
-private fun themeCardPreviewTokens(display: DisplaySetting): AmberTokens {
+private fun themeCardPreviewTokens(display: DisplaySetting, darkPalette: Boolean): AmberTokens {
     val pack = display.themePack
-    val base = pack?.let { themePackPaperTokens(it.paper, isDark = false) }
-        ?: baseTokens(if (display.amberBaseFamily == "SAGE") AmberBase.SAGE else AmberBase.LIGHT)
+    val family = when {
+        display.amberBaseFamily == "SAGE" && darkPalette -> AmberBase.SAGE_DARK
+        display.amberBaseFamily == "SAGE" -> AmberBase.SAGE
+        darkPalette -> AmberBase.DARK
+        else -> AmberBase.LIGHT
+    }
+    val base = pack?.let { themePackPaperTokens(it.paper, darkPalette) } ?: baseTokens(family)
     val accentRgb = themeRgb(pack?.accentHex ?: display.accentColor)
         ?: runCatching { android.graphics.Color.parseColor(display.accentColor) and 0xFFFFFF }.getOrNull()
         ?: (SIT_TERRACOTTA_ACCENT_HEX.drop(1).toInt(16))
@@ -582,7 +594,7 @@ private fun ThemeCard(
                 modifier = Modifier.weight(1f),
                 color = preview.ink,
                 style = MaterialTheme.typography.titleSmall,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
             when {

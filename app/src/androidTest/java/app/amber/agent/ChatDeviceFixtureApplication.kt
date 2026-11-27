@@ -54,7 +54,7 @@ class ChatDeviceFixtureApplication : Application() {
         startKoin {
             androidContext(this@ChatDeviceFixtureApplication)
             modules(appModule, chatModule, memoryModule, iCloudModule, webMountModule,
-                agentRuntimeModule, agentInfraModule, boardModule, workspaceModule, novelModule,
+                agentRuntimeModule, agentInfraModule, workspaceModule,
                 viewModelModule, dataSourceModule, generationModule, toolExecutionModule,
                 repositoryModule, jevModule,
                 module {

@@ -95,7 +95,6 @@ private fun EmptyChatSuggestions(
     val tokens = LocalAmberTokens.current
     val suggestions = generatedSuggestions.ifEmpty {
         listOf(
-            stringResource(R.string.amber_redesign_suggestion_board),
             stringResource(R.string.amber_redesign_suggestion_reply),
             stringResource(R.string.amber_redesign_suggestion_concept),
         )

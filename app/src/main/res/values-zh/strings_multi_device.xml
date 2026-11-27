@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="amber_multi_device_mac">Mac</string>
+    <string name="amber_multi_device_not_paired">未配对</string>
+    <string name="amber_multi_device_cloud_pair_hint">扫描 amberd 生成的配对二维码，或粘贴配对链接。</string>
+    <string name="amber_multi_device_fingerprint_hint">请核对指纹与主机显示的指纹一致。</string>
+    <string name="amber_multi_device_wrong_role">此配对链接属于另一个标签页。</string>
+    <string name="amber_multi_device_already_paired">这台主机已在另一个标签页配对。</string>
+    <string name="amber_multi_device_pairing_changed">配对已变化，请在当前连接中重试。</string>
+    <string name="amber_multi_device_dialogue_section">对话主机</string>
+    <string name="amber_multi_device_dialogue_select">使用%1$s对话</string>
+    <string name="amber_multi_device_dialogue_hint">选中后，新消息将发送到此主机。</string>
+    <string name="amber_multi_device_dialogue_unavailable">此主机离线或暂不支持 Amber 对话。</string>
+    <string name="amber_multi_device_unpair_title">解除与%1$s的配对？</string>
+    <string name="amber_multi_device_unpair_message">解除本机与当前所选主机的配对。</string>
+    <string name="amber_multi_device_unpaired_offline">本机已解除配对，主机未确认移除。</string>
+    <string name="amber_multi_device_unreachable">无法连接主机，请检查网络和电源。</string>
+    <string name="amber_multi_device_certificate">主机证书已变更。请解除配对，核对新指纹后重新连接。</string>
+    <string name="amber_multi_device_unauthorized">主机已撤销本机的配对，请重新配对。</string>
+    <string name="amber_multi_device_camera_permission">需要相机权限才能扫码。</string>
+    <string name="amber_multi_device_mac_dialogue">Mac 对话</string>
+    <string name="amber_multi_device_mac_running">正在 Mac 上执行…</string>
+</resources>

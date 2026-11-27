@@ -62,8 +62,6 @@ import app.amber.core.service.ChatStartSuggestionGenerator
 import app.amber.core.service.ConversationTimelineLoadState
 import app.amber.core.service.PendingUserMessage
 import app.amber.core.service.PendingUserMessageMode
-import app.amber.core.ai.tools.parseDeepReadSlashCommand
-import app.amber.core.event.AppEventBus
 import app.amber.core.service.blockedReason
 import app.amber.core.service.errorsForConversation
 import app.amber.core.service.globalErrors
@@ -86,7 +84,6 @@ class ChatVM(
     private val conversationRepo: ConversationRepository,
     private val chatService: ChatService,
     private val analytics: FirebaseAnalytics,
-    private val eventBus: AppEventBus,
     private val filesManager: FilesManager,
     private val favoriteRepository: FavoriteRepository,
     private val contextRepository: ConversationContextRepository,
@@ -392,6 +389,19 @@ class ChatVM(
         }
     }
 
+    fun setChatReasoningLevel(modelId: Uuid, level: ReasoningLevel) {
+        viewModelScope.launch {
+            settingsStore.update { settings ->
+                if (settings.chatModelId != modelId) return@update settings
+                settings.copy(
+                    reasoningLevel = level,
+                    rememberedReasoningLevelsByModelId =
+                        settings.rememberedReasoningLevelsByModelId + (modelId.toString() to level),
+                )
+            }
+        }
+    }
+
     /**
      * 处理消息发送
      *
@@ -406,11 +416,7 @@ class ChatVM(
     ): Boolean {
         if (content.isEmptyInputMessage()) return false
         analytics.logEvent("ai_send_message", null)
-        val accepted = if (parseDeepReadSlashCommand(content)?.let { eventBus.tryEmit(it) } == true) {
-            true
-        } else {
-            chatService.sendMessage(_conversationId, content, answer, queueMode, messageId)
-        }
+        val accepted = chatService.sendMessage(_conversationId, content, answer, queueMode, messageId)
         // P3-03: once anything is actually sent, a MiniApp-hosted composer
         // draft is consumed and must not come back on the next open.
         if (accepted) {

@@ -90,12 +90,7 @@ fun CloudProactiveCenterPage(
 @Composable
 private fun CloudProactiveCenterContent(vm: ProactiveCenterSession) {
     val state by vm.uiState.collectAsStateWithLifecycle()
-    val navController = LocalNavController.current
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-    val pullState = rememberPullToRefreshState()
-
-    var pendingDeleteMonitor by remember { mutableStateOf<CloudProactiveMonitorRecord?>(null) }
-    var pendingDeleteWebhook by remember { mutableStateOf<CloudProactiveWebhookRecord?>(null) }
 
     Scaffold(
         topBar = {
@@ -127,154 +122,176 @@ private fun CloudProactiveCenterContent(vm: ProactiveCenterSession) {
             .amberCanvas(),
         containerColor = Color.Transparent,
     ) { innerPadding ->
+        CloudProactiveCenterBody(
+            vm = vm,
+            contentPadding = innerPadding,
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun CloudProactiveCenterBody(
+    vm: ProactiveCenterSession,
+    contentPadding: PaddingValues = PaddingValues(0.dp),
+    modifier: Modifier = Modifier,
+) {
+    val state by vm.uiState.collectAsStateWithLifecycle()
+    val navController = LocalNavController.current
+    val pullState = rememberPullToRefreshState()
+
+    var pendingDeleteMonitor by remember { mutableStateOf<CloudProactiveMonitorRecord?>(null) }
+    var pendingDeleteWebhook by remember { mutableStateOf<CloudProactiveWebhookRecord?>(null) }
+
+    Box(modifier = modifier) {
         if (!state.isPaired) {
             UnpairedProactiveCenterBody(
-                innerPadding = innerPadding,
+                innerPadding = contentPadding,
                 onOpenGatewaySettings = {
                     navController.navigate(Screen.SettingExperimentalMacGateway)
                 },
             )
-            return@Scaffold
-        }
-
-        PullToRefreshBox(
-            isRefreshing = state.refreshing,
-            onRefresh = { vm.refresh() },
-            state = pullState,
-            modifier = Modifier.fillMaxSize(),
-        ) {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .testTag("proactive-center-list"),
-                contentPadding = innerPadding + PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+        } else {
+            PullToRefreshBox(
+                isRefreshing = state.refreshing,
+                onRefresh = { vm.refresh() },
+                state = pullState,
+                modifier = Modifier.fillMaxSize(),
             ) {
-                // Top guidance banner
-                item("chat_hint") {
-                    ChatCreationHintBanner()
-                }
-
-                // Inline notice / unsupported warning
-                state.notice?.let { notice ->
-                    item("notice") {
-                        NoticeBanner(notice = notice)
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .testTag("proactive-center-list"),
+                    contentPadding = contentPadding + PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    // Top guidance banner
+                    item("chat_hint") {
+                        ChatCreationHintBanner()
                     }
-                }
 
-                // Initial loading or blocking load error
-                val summary = state.summary
-                if (state.loading && summary == null) {
-                    item("loading") {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 36.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            CircularProgressIndicator()
+                    // Inline notice / unsupported warning
+                    state.notice?.let { notice ->
+                        item("notice") {
+                            NoticeBanner(notice = notice)
                         }
                     }
-                    return@LazyColumn
-                }
 
-                val loadError = state.loadError
-                if (summary == null && loadError != null) {
-                    item("load_error") {
-                        ExperimentSectionCard(title = stringResource(R.string.proactive_center_title)) {
-                            ExperimentNote(
-                                text = describeProactiveError(loadError),
-                                error = true,
-                            )
-                            Button(
-                                onClick = { vm.loadSummary(isRefresh = false) },
-                                modifier = Modifier.heightIn(min = 48.dp),
+                    // Initial loading or blocking load error
+                    val summary = state.summary
+                    if (state.loading && summary == null) {
+                        item("loading") {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 36.dp),
+                                contentAlignment = Alignment.Center,
                             ) {
-                                Text(stringResource(R.string.proactive_detail_retry))
+                                CircularProgressIndicator()
                             }
                         }
+                        return@LazyColumn
                     }
-                    return@LazyColumn
-                }
 
-                if (summary == null) return@LazyColumn
+                    val loadError = state.loadError
+                    if (summary == null && loadError != null) {
+                        item("load_error") {
+                            ExperimentSectionCard(title = stringResource(R.string.proactive_center_title)) {
+                                ExperimentNote(
+                                    text = describeProactiveError(loadError),
+                                    error = true,
+                                )
+                                Button(
+                                    onClick = { vm.loadSummary(isRefresh = false) },
+                                    modifier = Modifier.heightIn(min = 48.dp),
+                                ) {
+                                    Text(stringResource(R.string.proactive_detail_retry))
+                                }
+                            }
+                        }
+                        return@LazyColumn
+                    }
 
-                // 1. P2 Upcoming Reminders (Wakeups)
-                item("wakeups") {
-                    WakeupsSection(
-                        wakeups = summary.wakeups,
-                        unsupported = ProactiveFeature.WAKEUPS in state.unsupportedFeatures,
-                        mutatingKeys = state.mutatingKeys,
-                        onCancelWakeup = vm::cancelWakeup,
-                    )
-                }
+                    if (summary == null) return@LazyColumn
 
-                // 2. P1+P2 Restraint & Daily Pulse
-                item("restraint") {
-                    RestraintAndPulseSection(
-                        restraint = summary.restraint,
-                        quietStartDraft = state.quietStartDraft,
-                        quietEndDraft = state.quietEndDraft,
-                        pulseTimeDraft = state.pulseTimeDraft,
-                        scheduleValidationError = state.scheduleValidationError,
-                        restraintUnsupported = ProactiveFeature.RESTRAINT in state.unsupportedFeatures,
-                        p2Unsupported = ProactiveFeature.RESTRAINT_P2 in state.unsupportedFeatures,
-                        mutatingKeys = state.mutatingKeys,
-                        onQuietHoursToggle = vm::setQuietHoursEnabled,
-                        onQuietStartChanged = vm::onQuietStartChanged,
-                        onQuietEndChanged = vm::onQuietEndChanged,
-                        onDailyMaxPushesChanged = vm::setDailyMaxPushes,
-                        onPulseToggle = vm::setPulseEnabled,
-                        onPulseTimeChanged = vm::onPulseTimeChanged,
-                        onCommitmentToggle = vm::setCommitmentExtractionEnabled,
-                        onSaveTimes = vm::saveScheduleTimes,
-                    )
-                }
+                    // 1. P2 Upcoming Reminders (Wakeups)
+                    item("wakeups") {
+                        WakeupsSection(
+                            wakeups = summary.wakeups,
+                            unsupported = ProactiveFeature.WAKEUPS in state.unsupportedFeatures,
+                            mutatingKeys = state.mutatingKeys,
+                            onCancelWakeup = vm::cancelWakeup,
+                        )
+                    }
 
-                // 3. P1+P3 Monitors + GitHub Release quick subscribe
-                item("monitors") {
-                    MonitorsSection(
-                        monitors = summary.monitors,
-                        deliveryModeUnsupported = ProactiveFeature.MONITOR_DELIVERY_MODE in state.unsupportedFeatures,
-                        githubCreateUnsupported = ProactiveFeature.CREATE_GITHUB_MONITOR in state.unsupportedFeatures,
-                        mutatingKeys = state.mutatingKeys,
-                        githubRepoInput = state.githubRepoInput,
-                        githubDeliveryMode = state.githubDeliveryMode,
-                        githubValidationError = state.githubValidationError,
-                        creatingGithubMonitor = state.creatingGithubMonitor,
-                        onGithubRepoInputChanged = vm::onGithubRepoInputChanged,
-                        onGithubDeliveryModeChanged = vm::onGithubDeliveryModeChanged,
-                        onSubmitGithubMonitor = vm::submitGithubReleaseMonitor,
-                        onToggleMonitor = vm::setMonitorEnabled,
-                        onChangeDeliveryMode = vm::setMonitorDeliveryMode,
-                        onRequestDeleteMonitor = { pendingDeleteMonitor = it },
-                    )
-                }
+                    // 2. P1+P2 Restraint & Daily Pulse
+                    item("restraint") {
+                        RestraintAndPulseSection(
+                            restraint = summary.restraint,
+                            quietStartDraft = state.quietStartDraft,
+                            quietEndDraft = state.quietEndDraft,
+                            pulseTimeDraft = state.pulseTimeDraft,
+                            scheduleValidationError = state.scheduleValidationError,
+                            restraintUnsupported = ProactiveFeature.RESTRAINT in state.unsupportedFeatures,
+                            p2Unsupported = ProactiveFeature.RESTRAINT_P2 in state.unsupportedFeatures,
+                            mutatingKeys = state.mutatingKeys,
+                            onQuietHoursToggle = vm::setQuietHoursEnabled,
+                            onQuietStartChanged = vm::onQuietStartChanged,
+                            onQuietEndChanged = vm::onQuietEndChanged,
+                            onDailyMaxPushesChanged = vm::setDailyMaxPushes,
+                            onPulseToggle = vm::setPulseEnabled,
+                            onPulseTimeChanged = vm::onPulseTimeChanged,
+                            onCommitmentToggle = vm::setCommitmentExtractionEnabled,
+                            onSaveTimes = vm::saveScheduleTimes,
+                        )
+                    }
 
-                // 4. P1 Webhooks
-                item("webhooks") {
-                    WebhooksSection(
-                        webhooks = summary.webhooks,
-                        unsupported = ProactiveFeature.WEBHOOKS in state.unsupportedFeatures,
-                        mutatingKeys = state.mutatingKeys,
-                        onToggleWebhook = vm::setWebhookEnabled,
-                        onRequestDeleteWebhook = { pendingDeleteWebhook = it },
-                    )
-                }
+                    // 3. P1+P3 Monitors + GitHub Release quick subscribe
+                    item("monitors") {
+                        MonitorsSection(
+                            monitors = summary.monitors,
+                            deliveryModeUnsupported = ProactiveFeature.MONITOR_DELIVERY_MODE in state.unsupportedFeatures,
+                            githubCreateUnsupported = ProactiveFeature.CREATE_GITHUB_MONITOR in state.unsupportedFeatures,
+                            mutatingKeys = state.mutatingKeys,
+                            githubRepoInput = state.githubRepoInput,
+                            githubDeliveryMode = state.githubDeliveryMode,
+                            githubValidationError = state.githubValidationError,
+                            creatingGithubMonitor = state.creatingGithubMonitor,
+                            onGithubRepoInputChanged = vm::onGithubRepoInputChanged,
+                            onGithubDeliveryModeChanged = vm::onGithubDeliveryModeChanged,
+                            onSubmitGithubMonitor = vm::submitGithubReleaseMonitor,
+                            onToggleMonitor = vm::setMonitorEnabled,
+                            onChangeDeliveryMode = vm::setMonitorDeliveryMode,
+                            onRequestDeleteMonitor = { pendingDeleteMonitor = it },
+                        )
+                    }
 
-                // 5. P1 Muted Topics
-                item("muted_topics") {
-                    MutedTopicsSection(
-                        mutedTopics = summary.restraint.mutedTopics,
-                        unsupported = ProactiveFeature.UNMUTE in state.unsupportedFeatures,
-                        mutatingKeys = state.mutatingKeys,
-                        onUnmute = vm::unmuteTopic,
-                    )
-                }
+                    // 4. P1 Webhooks
+                    item("webhooks") {
+                        WebhooksSection(
+                            webhooks = summary.webhooks,
+                            unsupported = ProactiveFeature.WEBHOOKS in state.unsupportedFeatures,
+                            mutatingKeys = state.mutatingKeys,
+                            onToggleWebhook = vm::setWebhookEnabled,
+                            onRequestDeleteWebhook = { pendingDeleteWebhook = it },
+                        )
+                    }
 
-                // 6. P1-P3 Recent Runs
-                item("recent_runs") {
-                    RecentRunsSection(runs = summary.recentRuns)
+                    // 5. P1 Muted Topics
+                    item("muted_topics") {
+                        MutedTopicsSection(
+                            mutedTopics = summary.restraint.mutedTopics,
+                            unsupported = ProactiveFeature.UNMUTE in state.unsupportedFeatures,
+                            mutatingKeys = state.mutatingKeys,
+                            onUnmute = vm::unmuteTopic,
+                        )
+                    }
+
+                    // 6. P1-P3 Recent Runs
+                    item("recent_runs") {
+                        RecentRunsSection(runs = summary.recentRuns)
+                    }
                 }
             }
         }

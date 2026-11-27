@@ -3,8 +3,6 @@ package app.amber.core.di
 import android.content.Context
 import app.amber.core.conversation.exchange.ConversationExchangeFileHandler
 import app.amber.core.conversation.exchange.ConversationExchangeService
-import app.amber.feature.board.BoardRepository
-import app.amber.feature.board.hotlist.HotListRepository
 import app.amber.feature.miniapp.MiniAppRepository
 import app.amber.feature.prompts.AgentPromptConfigRepository
 import app.amber.core.files.FilesManager
@@ -77,14 +75,6 @@ val repositoryModule = module {
 
     single {
         SkillManager(get(), get())
-    }
-
-    single {
-        BoardRepository(get(), get(), get(), get(), get(), get())
-    }
-
-    single {
-        HotListRepository(get(), get(), get<SyncRestoreWriteGate>())
     }
 
     single {

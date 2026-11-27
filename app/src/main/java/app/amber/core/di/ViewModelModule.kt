@@ -29,9 +29,6 @@ import app.amber.feature.ui.pages.setting.SettingCapabilityPermissionsVM
 import app.amber.feature.ui.pages.setting.SettingVM
 import app.amber.feature.ui.pages.setting.StorageVM
 import app.amber.feature.ui.pages.share.handler.ShareHandlerVM
-import app.amber.feature.ui.pages.synara.SynaraConnectionStore
-import app.amber.feature.ui.pages.synara.SynaraVM
-import app.amber.feature.ui.pages.zcode.ZCodeUrlStore
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.module.dsl.viewModel
 import org.koin.core.module.dsl.viewModelOf
@@ -50,7 +47,6 @@ val viewModelModule = module {
             conversationRepo = get(),
             chatService = get(),
             analytics = get(),
-            eventBus = get(),
             filesManager = get(),
             favoriteRepository = get(),
             contextRepository = get(),
@@ -82,9 +78,6 @@ val viewModelModule = module {
     viewModelOf(::DebugVM)
     viewModelOf(::HistoryVM)
     viewModelOf(::LiveCompanionVM)
-    single { SynaraConnectionStore(androidContext()) }
-    viewModel { SynaraVM(store = get()) }
-    single { ZCodeUrlStore(androidContext()) }
     viewModel<ShareHandlerVM> {
         ShareHandlerVM(
             text = it.get(),

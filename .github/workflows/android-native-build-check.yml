@@ -68,8 +68,6 @@ jobs:
         run: cargo test --workspace --locked
 
       - name: Gradle debug build
-        # `surface` flavors: CI validates the canonical `full` product only;
-        # standalone flavors (novel/deepread) are verified locally.
         run: ./gradlew :app:assembleFullDebug :app:assembleFullDebugAndroidTest --no-daemon --console=plain
 
       - name: Native extraction and terminal upgrade regression tests
@@ -88,7 +86,6 @@ jobs:
             "lib/arm64-v8a/libmarkdown_parser.so"
             "lib/arm64-v8a/libhighlight_parser.so"
             "lib/arm64-v8a/libregex_transformer.so"
-            "lib/arm64-v8a/libreader_extractor.so"
             "lib/arm64-v8a/libsync_crypto.so"
             "lib/arm64-v8a/libmarkdown_preprocess.so"
             "lib/arm64-v8a/libhtml_diff_normalizer.so"

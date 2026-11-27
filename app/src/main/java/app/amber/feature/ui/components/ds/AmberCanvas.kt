@@ -22,6 +22,7 @@ import kotlin.math.ceil
 import kotlin.math.max
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmoledDarkMode
+import app.amber.feature.ui.theme.LocalDarkThemePalette
 import app.amber.feature.ui.theme.LocalThemeCanvasStyle
 import app.amber.feature.ui.theme.LocalThemeDesign
 import app.amber.feature.ui.theme.LocalThemePack
@@ -44,6 +45,7 @@ import app.amber.core.settings.ThemeDesign
 fun Modifier.amberCanvas(): Modifier {
     val tokens = LocalAmberTokens.current
     val amoled = LocalAmoledDarkMode.current
+    val darkPalette = LocalDarkThemePalette.current
     val design = LocalThemeDesign.current
     val canvasStyle = LocalThemeCanvasStyle.current
     val themePack = LocalThemePack.current
@@ -74,7 +76,7 @@ fun Modifier.amberCanvas(): Modifier {
             null
         }
         val gradientBrush = if (amoled || !drawThemeOverlay) null
-        else themeGradientBrush(design?.gradient, tokens.isDark, canvasSize)
+        else themeGradientBrush(design?.gradient, darkPalette, canvasSize)
         onDrawBehind {
             if (!amoled && drawThemeOverlay) {
                 gradientBrush?.let { drawRect(it) }

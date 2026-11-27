@@ -2,30 +2,13 @@ package app.amber.feature.board
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import app.amber.feature.board.hotlist.HotListProviderIds
 
-/**
- * Default trigger anchors in 24h local time. Users can toggle these on/off individually.
- * 08:00 / 12:00 / 18:00 drive the board signal pipeline.
- * 13:00 / 19:00 additionally trigger the daily review generation windows.
- */
-val DEFAULT_TODAY_BOARD_TRIGGER_HOURS = listOf("08:00", "12:00", "13:00", "18:00", "19:00")
-
-/**
- * Cutoff hour for nightly cleanup. Items from previous days' boards are archived at this
- * hour local time so the next day's surface starts fresh. Chose 04:00 over midnight so
- * late-night users don't have their just-generated board wiped while they're still using
- * the app.
- */
-const val TODAY_BOARD_DAY_CUTOFF_HOUR = 4
+private val DEFAULT_TODAY_BOARD_TRIGGER_HOURS = listOf("08:00", "12:00", "13:00", "18:00", "19:00")
 
 /** Signals scoring at or below this threshold are treated as hard-muted. */
 const val TODAY_BOARD_HARD_MUTE_WEIGHT = -10
 
-/** Number of consecutive dismisses before auto-mute kicks in. */
-const val TODAY_BOARD_AUTO_MUTE_DISMISS_COUNT = 3
-
-val DEFAULT_HOT_LIST_FOCUS_KEYWORDS = listOf(
+private val DEFAULT_HOT_LIST_FOCUS_KEYWORDS = listOf(
     "AI",
     "人工智能",
     "大模型",
@@ -120,105 +103,17 @@ enum class TodayBoardReadingFontMode(val wireName: String) {
     }
 }
 
-object DeepReadTemplateIds {
-    const val COMPOSE_MAGAZINE = "compose_magazine"
-    const val EDITORIAL_SLANT = "editorial_slant"
-    const val CUSTOM_PREFIX = "custom:"
-
-    // Generation templates (iOS `DeepReadSynthesisTemplate`); AUTO asks the model
-    // which concrete template fits the collected sources.
-    const val AUTO = "deepread_auto"
-    const val BRIEF = "deepread_brief"
-    const val QA = "deepread_qa"
-    const val DEBATE = "deepread_debate"
-    const val TIMELINE = "deepread_timeline"
-    const val REVIEW = "deepread_review"
-
-    /** Every built-in choice in iOS display order: auto, magazine pair, then the five synthesis kinds. */
-    val GENERATION_OPTIONS: List<String> = listOf(
-        AUTO,
-        COMPOSE_MAGAZINE,
-        EDITORIAL_SLANT,
-        BRIEF,
-        QA,
-        DEBATE,
-        TIMELINE,
-        REVIEW,
-    )
-
-    fun custom(id: String): String = if (id.startsWith(CUSTOM_PREFIX)) id else "$CUSTOM_PREFIX$id"
-
-    /** iOS `IOSDeepReadTemplate.normalized(id)` parity — legacy ids fold onto built-ins. */
-    fun normalize(id: String?): String = when (id?.trim()) {
-        null, "", "ios_magazine", "ios_analysis" -> COMPOSE_MAGAZINE
-        "ios_reading" -> EDITORIAL_SLANT
-        else -> id.trim()
-    }
-
-    fun isSynthesis(id: String?): Boolean =
-        normalize(id) in setOf(AUTO, BRIEF, QA, DEBATE, TIMELINE, REVIEW)
-}
-
-/**
- * Standalone DeepRead app accent ids — iOS `DeepReadAccent` parity. Stored on
- * [TodayBoardSetting.deepReadAccent]; color/name resolution lives in the UI layer.
- */
-object DeepReadAccentIds {
-    const val CINNABAR = "cinnabar"
-    const val INDIGO = "indigo"
-    const val PINE = "pine"
-    const val WISTERIA = "wisteria"
-    const val INK = "ink"
-}
-
-const val DEEP_READ_FONT_SCALE_MIN = 0.85f
-const val DEEP_READ_FONT_SCALE_MAX = 1.25f
-const val DEEP_READ_FONT_SCALE_STEP = 0.05f
-
-/**
- * Canonical source types for BoardSignalEntity.sourceType. Kept as string constants rather
- * than an enum to allow future collectors (mail / github / rss) to be added without DB
- * schema churn — the column stays TEXT.
- */
-object BoardSignalSourceType {
-    const val NOTIFICATION = "notification"
-    const val CALENDAR = "calendar"
-    const val FEISHU_MSG = "feishu_msg"
-    const val FEISHU_DOC = "feishu_doc"
-    const val CHAT_HISTORY = "chat_history"
-    const val TIME = "time"
-
-    val MVP_SOURCES: Set<String> = setOf(
-        NOTIFICATION,
-        CALENDAR,
-        FEISHU_MSG,
-        CHAT_HISTORY,
-        TIME,
-    )
-}
-
-/**
- * All data-source toggles and trigger policy live here. Intentionally flat and small —
- * we'd rather ship a thin config surface and extend it as features land than pre-bake a
- * settings UI that mostly sits empty.
- *
- * [boardModelId] is nullable on purpose: when null the board inherits the user's main
- * chat model, mirroring the SubAgent "follow main model" convention. Setting a specific
- * model id here lets privacy / cost-sensitive users route board runs to a cheaper model.
- *
- * [enabledSources] uses BoardSignalSourceType string keys. New sources added later don't
- * require a schema migration — default-off via absence from the set.
- */
+/** Serialized settings retained for existing installations and backups. */
 @Serializable
 data class TodayBoardSetting(
     val enabled: Boolean = false,
     val boardModelId: String? = null,
-    val enabledSources: Set<String> = BoardSignalSourceType.MVP_SOURCES,
+    val enabledSources: Set<String> = setOf("notification", "calendar", "feishu_msg", "chat_history", "time"),
     val triggerHours: List<String> = DEFAULT_TODAY_BOARD_TRIGGER_HOURS,
     val incrementalSignalThreshold: Int = 5,
     val hotListRefreshIntervalMinutes: Int = 60,
     val hotListWifiOnly: Boolean = false,
-    val hotListEnabledSources: Set<String> = HotListProviderIds.DEFAULT_ENABLED,
+    val hotListEnabledSources: Set<String> = setOf("bilibili", "hacker_news"),
     val hotListFocusKeywords: List<String> = DEFAULT_HOT_LIST_FOCUS_KEYWORDS,
     val hotListFilterMode: TodayBoardHotListFilterMode = TodayBoardHotListFilterMode.FOCUS_FIRST,
     val deepReadFirstUseConfirmed: Boolean = false,
@@ -230,13 +125,8 @@ data class TodayBoardSetting(
     val boardReadingFontMode: TodayBoardReadingFontMode = TodayBoardReadingFontMode.SERIF,
     val boardReadingFontPackId: String? = null,
     val deepReadFontScale: Float = 1.0f,
-    val deepReadTemplateId: String = DeepReadTemplateIds.COMPOSE_MAGAZINE,
-    /**
-     * Standalone DeepRead product accent (iOS `DeepReadAppearance.accent`). Only
-     * consumed when `StandaloneSurfaces.current == DEEP_READ`; the full app keeps
-     * the user's global accent on board pages.
-     */
-    val deepReadAccent: String = DeepReadAccentIds.CINNABAR,
+    val deepReadTemplateId: String = "compose_magazine",
+    val deepReadAccent: String = "cinnabar",
     val density: TodayBoardDensity = TodayBoardDensity.STANDARD,
     val backgroundStrategy: TodayBoardBackgroundStrategy = TodayBoardBackgroundStrategy.SMART,
     val foregroundCompensationGapMs: Long = 2 * 60 * 60 * 1000L,

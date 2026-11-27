@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import android.util.Log
 import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
@@ -22,11 +23,14 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.uuid.Uuid
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -34,6 +38,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -155,14 +161,17 @@ class MacGatewayRepository(
     secretStore: SecretStore = createAndroidSecretStore(context),
     private val dataStore: DataStore<Preferences> = context.macGatewayDataStore,
     foregroundFlow: StateFlow<Boolean>? = null,
-    private val clientFactory: (MacGatewayConnection, String) -> MacGatewayClient = { conn, token ->
-        MacGatewayClient(conn.addrs, conn.port, conn.fingerprint, token)
+    private val clientFactory: (MacGatewayConnection, String?) -> MacGatewayClient = { conn, token ->
+        MacGatewayClient(conn.addrs, conn.port, conn.fingerprint, token, endpointRole = conn.role)
     },
     private val nowMs: () -> Long = { System.currentTimeMillis() },
     onProactiveCard: (suspend (ProactiveCardEntity) -> Unit)? = null,
+    private val endpointRole: GatewayEndpointRole = GatewayEndpointRole.CLOUD,
+    private val root: MacGatewayRepository? = null,
 ) {
     data class State(
         val loaded: Boolean = false,
+        val generation: Long = 0L,
         val connection: MacGatewayConnection? = null,
         val status: MacGatewayStatus? = null,
         /** null until the first refresh after pairing/launch. */
@@ -172,13 +181,25 @@ class MacGatewayRepository(
         val cloudDialogueEnabled: Boolean = false,
         /** Capability of this pairing's /v2/dialogue/events endpoint, unknown until it answers. */
         val cloudDialogueSupported: Boolean? = null,
+        val macTasks: MacTaskSnapshot = MacTaskSnapshot(),
     ) {
         val canSelectCloud: Boolean get() = connection != null && cloudDialogueSupported != false
         val isCloudDialogueActive: Boolean get() = cloudDialogueEnabled && canSelectCloud
     }
 
     private val tokenVault = GatewayTokenVault(secretStore)
-    private val pairingMutex = Mutex()
+    private val pairingMutex: Mutex = root?.pairingMutex ?: Mutex()
+    private val pairRequestMutex: Mutex = root?.pairRequestMutex ?: Mutex()
+    private val macTasksMutex = Mutex()
+    private val prefix = if (endpointRole == GatewayEndpointRole.MAC) "mac_" else ""
+    private val connectionKey = stringPreferencesKey("${prefix}connection")
+    private val legacyTokenKey = stringPreferencesKey("${prefix}token")
+    private val credentialKey = stringPreferencesKey("${prefix}credential")
+    private val dialogueEnabledKey = booleanPreferencesKey("${prefix}cloud_dialogue_enabled")
+    private val dialogueStateKey = stringPreferencesKey("${prefix}cloud_dialogue_state")
+
+    private val _selectedDialogueRole: MutableStateFlow<GatewayEndpointRole?> = root?._selectedDialogueRole ?: MutableStateFlow<GatewayEndpointRole?>(null)
+    val selectedDialogueRole = _selectedDialogueRole.asStateFlow()
 
     private val _state = MutableStateFlow(State())
     val state: StateFlow<State> = _state.asStateFlow()
@@ -205,6 +226,25 @@ class MacGatewayRepository(
         if (foregroundFlow == null) MutableStateFlow(false) else null
     private val isForeground: StateFlow<Boolean> = foregroundFlow ?: ownedForegroundFlow!!.asStateFlow()
 
+    private val macSlot: MacGatewayRepository by lazy {
+        MacGatewayRepository(
+            context = context,
+            appScope = appScope,
+            timelineSink = timelineSink,
+            secretStore = secretStore,
+            dataStore = dataStore,
+            foregroundFlow = isForeground,
+            clientFactory = clientFactory,
+            nowMs = nowMs,
+            onProactiveCard = onProactiveCard,
+            endpointRole = GatewayEndpointRole.MAC,
+            root = this,
+        )
+    }
+
+    fun slot(role: GatewayEndpointRole): MacGatewayRepository =
+        if (role == endpointRole) this else root?.slot(role) ?: macSlot
+
     private val lifecycleObserver = LifecycleEventObserver { _, event ->
         when (event) {
             Lifecycle.Event.ON_START -> ownedForegroundFlow?.value = true
@@ -222,14 +262,14 @@ class MacGatewayRepository(
             )
         }
 
-    private val cloudCoordinator = CloudDialogueCoordinator(
+    private val cloudCoordinator: CloudDialogueCoordinator = CloudDialogueCoordinator(
         clientProvider = { activeClient() },
         timelineSink = timelineSink,
         persistState = { persisted ->
             pairingMutex.withLock {
                 if (persisted.connectionGeneration == _connectionGeneration.value) {
                     dataStore.edit { prefs ->
-                        prefs[CLOUD_DIALOGUE_STATE] = MacGatewayJson.encodeToString(
+                        prefs[dialogueStateKey] = MacGatewayJson.encodeToString(
                             CloudDialoguePersistedState.serializer(),
                             persisted,
                         )
@@ -278,96 +318,144 @@ class MacGatewayRepository(
         }
 
         appScope.launch {
+            if (root == null) migrateLegacyConnection() else root.ready.await()
             val prefs = dataStore.data.first()
-            val connection = prefs[CONNECTION]?.let {
-                runCatching { MacGatewayJson.decodeFromString<MacGatewayConnection>(it) }.getOrNull()
+            val connection = decodeConnection(prefs[connectionKey])?.copy(role = endpointRole)
+            val legacyToken = prefs[legacyTokenKey]?.takeIf { it.isNotBlank() }
+            val token = connection?.let {
+                resolveAndMigrateToken(prefs[credentialKey] ?: it.gatewayId, legacyToken)
             }
-            val legacyToken = prefs[TOKEN]?.takeIf { it.isNotBlank() }
-            val token = if (connection != null) {
-                resolveAndMigrateToken(connection.gatewayId, legacyToken)
-            } else {
-                null
-            }
-            val cloudEnabled = prefs[CLOUD_DIALOGUE_ENABLED] == true
-            val persistedDialogue = prefs[CLOUD_DIALOGUE_STATE]?.let {
+            val cloudEnabled = prefs[dialogueEnabledKey] == true
+            val persistedDialogue = prefs[dialogueStateKey]?.let {
                 runCatching { MacGatewayJson.decodeFromString<CloudDialoguePersistedState>(it) }.getOrNull()
             }
             if (connection != null && token != null) client = clientFactory(connection, token)
             val activeConnection = connection.takeIf { client != null }
-            _state.update {
-                it.copy(
-                    loaded = true,
-                    connection = activeConnection,
-                    cloudDialogueEnabled = cloudEnabled && activeConnection != null,
-                )
-            }
             cloudCoordinator.restore(
                 enabled = cloudEnabled && activeConnection != null,
                 connection = activeConnection,
                 persisted = persistedDialogue,
             )
+            if (cloudEnabled && activeConnection != null) _selectedDialogueRole.value = endpointRole
+            _state.value = State(
+                loaded = true,
+                connection = activeConnection,
+                cloudDialogueEnabled = cloudEnabled && activeConnection != null,
+            )
             ready.complete(Unit)
+            if (root == null) slot(GatewayEndpointRole.MAC)
             reconcileCloudPolling()
             if (activeConnection != null) {
                 soulSyncCoordinator?.syncOnce()
             }
+        }.invokeOnCompletion { failure ->
+            if (failure != null) ready.completeExceptionally(failure)
+        }
+    }
+
+    private suspend fun migrateLegacyConnection() {
+        val prefs = dataStore.data.first()
+        val connection = decodeConnection(prefs[connectionKey]) ?: return
+        val role = connection.role ?: GatewayEndpointRole.inferLegacy(connection.name, connection.addrs)
+        if (role == GatewayEndpointRole.CLOUD) return
+        val mac = slot(GatewayEndpointRole.MAC)
+        dataStore.edit {
+            if (it[mac.connectionKey] != null) return@edit
+            it[mac.connectionKey] = encodeConnection(connection.copy(role = role))
+            it[legacyTokenKey]?.let { token -> it[mac.legacyTokenKey] = token }
+            it[credentialKey]?.let { credential -> it[mac.credentialKey] = credential }
+            it[dialogueEnabledKey]?.let { enabled -> it[mac.dialogueEnabledKey] = enabled }
+            it[dialogueStateKey]?.let { dialogue -> it[mac.dialogueStateKey] = dialogue }
+            clearPairing(it)
         }
     }
 
     suspend fun pair(payload: MacGatewayPairingPayload) {
-        ready.await()
-        val deviceName = Build.MODEL?.takeIf { it.isNotBlank() } ?: "Android"
-        val response = MacGatewayClient(payload.addrs, payload.port, payload.fp, token = null)
-            .pair(payload.s, deviceName = deviceName)
-        val connection = MacGatewayConnection(
-            gatewayId = response.gatewayId,
-            name = response.gatewayName,
-            addrs = payload.addrs,
-            port = payload.port,
-            fingerprint = payload.fp,
-            deviceId = response.deviceId,
-        )
-        pairingMutex.withLock {
-            val previousGatewayId = _state.value.connection?.gatewayId
-            val cloudEnabled = _state.value.cloudDialogueEnabled
-            // Persist encrypted token with read-back verification before committing connection metadata.
-            tokenVault.write(connection.gatewayId, response.token)
-            dataStore.edit {
-                it[CONNECTION] = MacGatewayJson.encodeToString(MacGatewayConnection.serializer(), connection)
-                it.remove(TOKEN)
-                it.remove(CLOUD_DIALOGUE_STATE)
-            }
-            if (previousGatewayId != null && previousGatewayId != connection.gatewayId) {
-                runCatching { tokenVault.delete(previousGatewayId) }
-            }
-            cloudCoordinator.restore(enabled = cloudEnabled, connection = connection, persisted = null) {
-                _connectionGeneration.update { it + 1L }
-                client = clientFactory(connection, response.token)
-                soulSyncCoordinator?.resetConnectionSession()
-                _state.value = State(loaded = true, connection = connection, cloudDialogueEnabled = cloudEnabled)
-            }
-        }
+        val pairedClient = pairRequestMutex.withLock { establishPairing(payload) }
         reconcileCloudPolling()
-        runCatching { uploadPushToken() }.onFailure { Log.w(TAG, "push token upload after pairing failed") }
-        refresh()
-        soulSyncCoordinator?.syncOnce()
+        runCatching { uploadPushToken(pairedClient) }.onFailure { Log.w(TAG, "push token upload after pairing failed") }
+        refresh(pairedClient)
+        soulSyncCoordinator?.syncOnce(pairedClient)
     }
 
-    suspend fun setCloudDialogueEnabled(enabled: Boolean) {
+    private suspend fun establishPairing(payload: MacGatewayPairingPayload): MacGatewayClient {
         ready.await()
-        val selected = client ?: return
-        if (enabled && _state.value.cloudDialogueSupported == null) {
-            // Resolve an unknown gateway before changing the visible host.
+        val other = slot(if (endpointRole == GatewayEndpointRole.CLOUD) GatewayEndpointRole.MAC else GatewayEndpointRole.CLOUD)
+        other.ready.await()
+        if (payload.role != null && payload.role != endpointRole) throw MacGatewayException.Conflict("wrong_endpoint_role")
+        if (other.state.value.connection?.gatewayId == payload.id) throw MacGatewayException.Conflict("gateway_in_other_slot")
+
+        val generation = _connectionGeneration.value
+        val candidate = MacGatewayConnection(payload.id, payload.name, payload.addrs, payload.port, payload.fp, "", endpointRole)
+        val deviceName = Build.MODEL?.takeIf { it.isNotBlank() } ?: "Android"
+        val response = clientFactory(candidate, null).pair(payload.s, deviceName)
+        if (response.gatewayId != candidate.gatewayId || response.deviceId.isBlank() || response.token.isBlank()) {
+            throw MacGatewayException.InvalidResponse()
+        }
+        val connection = candidate.copy(name = response.gatewayName, deviceId = response.deviceId)
+        val pairedClient = clientFactory(connection, response.token)
+        withContext(NonCancellable) {
+            pairingMutex.withLock {
+                if (generation != _connectionGeneration.value) throw MacGatewayException.Conflict("gateway_pairing_changed")
+                val prefs = dataStore.data.first()
+                val previousCredential = storedCredential(prefs)
+                val credential = "pairing-${Uuid.random()}"
+                try {
+                    tokenVault.write(credential, response.token)
+                    dataStore.edit {
+                        it[connectionKey] = encodeConnection(connection)
+                        it[credentialKey] = credential
+                        it.remove(legacyTokenKey)
+                        it.remove(dialogueStateKey)
+                    }
+                } catch (failure: Exception) {
+                    runCatching { tokenVault.delete(credential) }
+                    throw failure
+                }
+                val enabled = _selectedDialogueRole.value == endpointRole
+                cloudCoordinator.restore(enabled = enabled, connection = connection, persisted = null) {
+                    val next = _connectionGeneration.value + 1L
+                    _connectionGeneration.value = next
+                    client = pairedClient
+                    soulSyncCoordinator?.resetConnectionSession()
+                    _state.value = State(loaded = true, generation = next, connection = connection, cloudDialogueEnabled = enabled)
+                }
+                previousCredential?.let { runCatching { tokenVault.delete(it) } }
+            }
+        }
+        return pairedClient
+    }
+
+    suspend fun setCloudDialogueEnabled(enabled: Boolean, expectedGeneration: Long? = null): Boolean {
+        ready.await()
+        val other = slot(if (endpointRole == GatewayEndpointRole.CLOUD) GatewayEndpointRole.MAC else GatewayEndpointRole.CLOUD)
+        other.ready.await()
+        val selected = client ?: return false
+        if (expectedGeneration != null && _connectionGeneration.value != expectedGeneration) return false
+        if (enabled && _state.value.cloudDialogueSupported != true) {
             pollCloudDialogueOnce()
         }
-        pairingMutex.withLock {
-            if (selected !== client) return
-            val effective = enabled && _state.value.canSelectCloud
-            dataStore.edit { it[CLOUD_DIALOGUE_ENABLED] = effective }
-            _state.update { it.copy(cloudDialogueEnabled = effective) }
-            cloudCoordinator.setEnabled(effective)
+        val changed = withContext(NonCancellable) {
+            pairingMutex.withLock {
+                if (selected !== client || (enabled && _state.value.cloudDialogueSupported != true)) return@withLock false
+                dataStore.edit {
+                    it[dialogueEnabledKey] = enabled
+                    if (enabled) it.remove(other.dialogueEnabledKey)
+                }
+                if (enabled) {
+                    other._state.update { it.copy(cloudDialogueEnabled = false) }
+                    other.cloudCoordinator.setEnabled(false)
+                }
+                _state.update { it.copy(cloudDialogueEnabled = enabled) }
+                cloudCoordinator.setEnabled(enabled)
+                if (enabled) _selectedDialogueRole.value = endpointRole
+                else if (_selectedDialogueRole.value == endpointRole) _selectedDialogueRole.value = null
+                true
+            }
         }
+        other.reconcileCloudPolling()
         reconcileCloudPolling()
+        return changed
     }
 
     private suspend fun recordDialogueSupport(source: MacGatewayClient, supported: Boolean) {
@@ -375,8 +463,9 @@ class MacGatewayRepository(
         pairingMutex.withLock {
             if (source !== client || _state.value.cloudDialogueSupported == supported) return
             if (!supported) {
-                dataStore.edit { it[CLOUD_DIALOGUE_ENABLED] = false }
+                dataStore.edit { it.remove(dialogueEnabledKey) }
                 cloudCoordinator.setEnabled(false)
+                if (_selectedDialogueRole.value == endpointRole) _selectedDialogueRole.value = null
             }
             _state.update {
                 it.copy(cloudDialogueSupported = supported, cloudDialogueEnabled = supported && it.cloudDialogueEnabled)
@@ -394,18 +483,22 @@ class MacGatewayRepository(
         ensurePollLoopRunning()
     }
 
-    fun bindActiveConversation(conversationId: String) {
+    fun bindActiveConversation(conversationId: String, expectedConnectionGeneration: Long? = null) {
         appScope.launch {
             ready.await()
-            cloudCoordinator.bindActiveConversation(conversationId)
+            pairingMutex.withLock {
+                if (_selectedDialogueRole.value != endpointRole) return@withLock
+                if (expectedConnectionGeneration != null && expectedConnectionGeneration != _connectionGeneration.value) return@withLock
+                cloudCoordinator.bindActiveConversation(conversationId)
+            }
             reconcileCloudPolling()
         }
     }
 
-    fun selectFollowupTarget(workItemId: String?) {
+    fun selectFollowupTarget(workItemId: String?, expectedConnectionGeneration: Long? = null) {
         appScope.launch {
             ready.await()
-            cloudCoordinator.selectFollowupTarget(workItemId)
+            cloudCoordinator.selectFollowupTarget(workItemId, expectedConnectionGeneration)
         }
     }
 
@@ -454,11 +547,13 @@ class MacGatewayRepository(
     suspend fun stopCloudWorkItem(
         workItemId: String,
         requestId: String = Uuid.random().toString(),
+        expectedConnectionGeneration: Long? = null,
     ): CloudDialogueSubmission {
         ready.await()
         val sub = cloudCoordinator.stopWorkItem(
             workItemId = workItemId,
             requestId = requestId,
+            expectedConnectionGeneration = expectedConnectionGeneration,
         )
         reconcileCloudPolling()
         requestImmediatePoll("stop_work_item")
@@ -472,39 +567,53 @@ class MacGatewayRepository(
         }
     }
 
-    suspend fun recheckCloudOutcomeUnknown(workItemId: String): Boolean {
+    suspend fun recheckCloudOutcomeUnknown(workItemId: String, expectedConnectionGeneration: Long? = null): Boolean {
         ready.await()
-        return cloudCoordinator.recheckOutcomeUnknownTask(workItemId)
+        return cloudCoordinator.recheckOutcomeUnknownTask(workItemId, expectedConnectionGeneration)
     }
 
     suspend fun retryCloudOutcomeUnknown(
         conversationId: String,
         workItemId: String,
         requestId: String = Uuid.random().toString(),
+        expectedConnectionGeneration: Long? = null,
     ): CloudDialogueSubmission {
         ready.await()
         val sub = cloudCoordinator.retryOutcomeUnknownTask(
             conversationId = conversationId,
             workItemId = workItemId,
             requestId = requestId,
+            expectedConnectionGeneration = expectedConnectionGeneration,
         )
         reconcileCloudPolling()
         requestImmediatePoll("retry_outcome_unknown")
         return sub
     }
 
-    suspend fun abandonCloudOutcomeUnknown(workItemId: String) {
+    suspend fun abandonCloudOutcomeUnknown(workItemId: String, expectedConnectionGeneration: Long? = null) {
         ready.await()
-        cloudCoordinator.abandonOutcomeUnknownTask(workItemId)
+        cloudCoordinator.abandonOutcomeUnknownTask(workItemId, expectedConnectionGeneration)
     }
 
     /** Never throws; the outcome is reflected in [state]. A revoked device is forgotten locally. */
-    suspend fun refresh() {
-        val client = activeClient() ?: return
+    suspend fun refresh(expectedGeneration: Long? = null) {
+        ready.await()
+        val client = pairingMutex.withLock {
+            if (expectedGeneration != null && expectedGeneration != _connectionGeneration.value) return
+            client
+        } ?: return
+        refresh(client)
+    }
+
+    private suspend fun refresh(client: MacGatewayClient) {
         try {
             val status = client.status()
             pairingMutex.withLock {
                 if (client !== this.client) return
+                val connection = _state.value.connection
+                if (connection == null || connection.gatewayId != status.gateway.id || connection.deviceId != status.device.id) {
+                    throw MacGatewayException.InvalidResponse()
+                }
                 _state.update { it.copy(status = status, reachable = true, error = null) }
             }
             if (status.soulRevision != null) {
@@ -521,6 +630,82 @@ class MacGatewayRepository(
         }
     }
 
+    suspend fun refreshMacTasks(expectedGeneration: Long) {
+        require(endpointRole == GatewayEndpointRole.MAC)
+        ready.await()
+        macTasksMutex.withLock {
+            val source = pairingMutex.withLock {
+                val state = _state.value
+                if (state.generation != expectedGeneration || state.reachable != true) return
+                client
+            } ?: return
+            readMacTasks(source)
+        }
+    }
+
+    suspend fun createMacSchedule(draft: MacScheduleDraft, expectedGeneration: Long) =
+        changeMacSchedule(expectedGeneration) { source, _ -> source.createMacSchedule(draft) }
+
+    suspend fun setMacScheduleEnabled(id: String, enabled: Boolean, expectedGeneration: Long) =
+        changeMacSchedule(expectedGeneration) { source, schedules ->
+            if (schedules.none { it.id == id }) throw MacGatewayException.Conflict("schedule_changed")
+            source.setMacScheduleEnabled(id, enabled)
+        }
+
+    suspend fun runMacSchedule(id: String, expectedGeneration: Long) =
+        changeMacSchedule(expectedGeneration) { source, schedules ->
+            if (schedules.none { it.id == id && !it.running }) throw MacGatewayException.Conflict("schedule_changed")
+            source.runMacSchedule(id)
+        }
+
+    private suspend fun changeMacSchedule(
+        expectedGeneration: Long,
+        action: suspend (MacGatewayClient, List<MacGatewaySchedule>) -> Unit,
+    ) {
+        require(endpointRole == GatewayEndpointRole.MAC)
+        ready.await()
+        macTasksMutex.withLock {
+            val (source, schedules) = pairingMutex.withLock {
+                val source = requireClientLocked(expectedGeneration)
+                val state = _state.value
+                if (state.reachable != true) throw MacGatewayException.Unreachable()
+                val schedules = state.macTasks.schedules?.getOrThrow() ?: throw MacGatewayException.Unreachable()
+                source to schedules
+            }
+            try {
+                action(source, schedules)
+            } catch (failure: MacGatewayException.Unauthorized) {
+                forget(source, failure)
+                throw failure
+            } catch (failure: MacGatewayException) {
+                // Read again after a rejected request or a lost response. A mutation is never retried here.
+                readMacTasks(source)
+                throw failure
+            }
+            readMacTasks(source)
+        }
+    }
+
+    private suspend fun readMacTasks(source: MacGatewayClient) = coroutineScope {
+        if (source !== client) return@coroutineScope
+        val board = async { readMacCapability { source.macBoard() } }
+        val schedules = async { readMacCapability { source.macSchedules() } }
+        val snapshot = MacTaskSnapshot(board.await(), schedules.await())
+        if (snapshot.board?.exceptionOrNull() is MacGatewayException.Unauthorized ||
+            snapshot.schedules?.exceptionOrNull() is MacGatewayException.Unauthorized
+        ) {
+            forget(source, MacGatewayException.Unauthorized())
+        } else {
+            updateStateFor(source) { it.copy(macTasks = snapshot) }
+        }
+    }
+
+    private suspend fun <T> readMacCapability(read: suspend () -> T): Result<T> = try {
+        Result.success(read())
+    } catch (failure: MacGatewayException) {
+        Result.failure(failure)
+    }
+
     /** Pulls `/v2/soul` once (e.g. on foreground connect or opening the「形象人设」panel). */
     fun syncSoulWithCloud() {
         appScope.launch {
@@ -529,8 +714,8 @@ class MacGatewayRepository(
         }
     }
 
-    suspend fun setMonitored(taskKey: String, monitored: Boolean) {
-        val client = activeClient() ?: return
+    suspend fun setMonitored(taskKey: String, monitored: Boolean, expectedGeneration: Long? = null) {
+        val client = requireClient(expectedGeneration)
         suspend fun apply(value: Boolean) = updateStateFor(client) { state ->
             state.copy(status = state.status?.copy(sessions = state.status.sessions.map {
                 if (it.key == taskKey) it.copy(monitored = value) else it
@@ -553,19 +738,29 @@ class MacGatewayRepository(
         requiresLocalApproval: Boolean = false,
         riskLevel: String? = null,
         verifyForeground: (suspend () -> Boolean)? = null,
+        expectedGeneration: Long? = null,
+        fromMacBoard: Boolean = false,
     ) {
         ready.await()
-        val (client, status) = pairingMutex.withLock {
-            val source = this.client ?: return
-            source to _state.value.status
+        val (client, snapshot) = pairingMutex.withLock {
+            val source = requireClientLocked(expectedGeneration)
+            source to _state.value
         }
-        val sessionApproval = status?.sessions
+        val boardApproval = snapshot.macTasks.board?.getOrNull()
+            ?.firstNotNullOfOrNull { item ->
+                item.approval?.takeIf { it.sessionKey == sessionKey && it.toolCallId == toolCallId }
+            }?.asPendingApproval()
+        if (fromMacBoard && (endpointRole != GatewayEndpointRole.MAC || boardApproval == null || snapshot.reachable != true)) {
+            throw MacGatewayException.Conflict("gateway_approval_changed")
+        }
+        val sessionApproval = snapshot.status?.sessions
             ?.firstOrNull { it.key == sessionKey && it.pendingApproval?.toolCallId == toolCallId }
             ?.pendingApproval
-        val effectiveHighRisk = highRisk || sessionApproval?.highRisk == true
-        val effectiveRiskLevel = riskLevel ?: sessionApproval?.riskLevel
+        val effectiveHighRisk = highRisk || sessionApproval?.highRisk == true || boardApproval?.highRisk == true
+        val effectiveRiskLevel = riskLevel ?: boardApproval?.riskLevel ?: sessionApproval?.riskLevel
         val effectiveLocalOnly = requiresLocalApproval ||
             sessionApproval?.effectiveRequiresLocalApproval == true ||
+            boardApproval?.effectiveRequiresLocalApproval == true ||
             effectiveHighRisk ||
             effectiveRiskLevel.equals("L3", ignoreCase = true)
         if (effectiveLocalOnly && allow) {
@@ -583,7 +778,9 @@ class MacGatewayRepository(
                 sessionKey = sessionKey,
                 toolCallId = toolCallId,
                 allow = allow,
-                verifyForeground = verifyForeground,
+                verifyForeground = verifyForeground?.let { verify ->
+                    suspend { verify() && client === this.client }
+                },
                 highRisk = effectiveHighRisk,
                 requiresLocalApproval = effectiveLocalOnly,
                 riskLevel = effectiveRiskLevel,
@@ -631,48 +828,72 @@ class MacGatewayRepository(
                 ),
             )
         }
-        refresh()
+        refresh(client)
+        if (endpointRole == GatewayEndpointRole.MAC && snapshot.macTasks.board != null) {
+            refreshMacTasks(snapshot.generation)
+        }
     }
 
-    suspend fun uploadPushToken() {
-        val client = activeClient() ?: return
+    suspend fun uploadPushToken(expectedGeneration: Long? = null) {
+        uploadPushToken(requireClient(expectedGeneration))
+    }
+
+    private suspend fun uploadPushToken(client: MacGatewayClient) {
         val pushToken = fetchFcmToken()
-        if (this.client !== client) return
+        if (this.client !== client) throw MacGatewayException.Conflict("gateway_pairing_changed")
         client.registerPushToken(pushToken)
         updateStateFor(client) { state ->
             state.copy(status = state.status?.copy(device = state.status.device.copy(pushRegistered = true)))
         }
     }
 
-    suspend fun testPush() {
-        activeClient()?.testPush()
+    suspend fun testPush(expectedGeneration: Long? = null) {
+        requireClient(expectedGeneration).testPush()
     }
 
-    /** Returns false when the Mac could not be told; the pairing is forgotten locally either way. */
-    suspend fun unpair(): Boolean {
-        val client = activeClient()
-        val acknowledged = client == null || runCatching { client.unpair() }.isSuccess
+    /** Returns whether the server acknowledged unpairing. The local pairing is removed either way. */
+    suspend fun unpair(expectedGeneration: Long? = null): Boolean {
+        ready.await()
+        val client = pairingMutex.withLock {
+            if (expectedGeneration != null && expectedGeneration != _connectionGeneration.value) {
+                throw MacGatewayException.Conflict("gateway_pairing_changed")
+            }
+            client
+        }
+        val acknowledged = try {
+            client?.unpair()
+            true
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: MacGatewayException) {
+            false
+        }
         forget(client)
         return acknowledged
     }
 
     fun onNewPushToken() {
-        appScope.launch {
-            runCatching { uploadPushToken() }.onFailure { Log.w(TAG, "push token refresh upload failed") }
+        GatewayEndpointRole.entries.forEach { role ->
+            val slot = slot(role)
+            appScope.launch {
+                val client = slot.activeClient() ?: return@launch
+                runCatching { slot.uploadPushToken(client) }
+                    .onFailure { Log.w(TAG, "push token refresh upload failed") }
+            }
         }
     }
 
     private suspend fun resolveAndMigrateToken(
-        gatewayId: String,
+        credential: String,
         legacyToken: String?,
     ): String? {
-        val vaultToken = runCatching { tokenVault.read(gatewayId) }
+        val vaultToken = runCatching { tokenVault.read(credential) }
             .getOrNull()
             ?.takeIf { it.isNotBlank() }
         if (vaultToken != null) {
             if (legacyToken != null) {
                 runCatching {
-                    dataStore.edit { it.remove(TOKEN) }
+                    dataStore.edit { it.remove(legacyTokenKey) }
                 }.onFailure {
                     Log.w(TAG, "failed to clean up legacy gateway token key after vault hit")
                 }
@@ -681,11 +902,11 @@ class MacGatewayRepository(
         }
         if (legacyToken == null) return null
         val migrated = runCatching {
-            tokenVault.write(gatewayId, legacyToken)
+            tokenVault.write(credential, legacyToken)
         }.isSuccess
         if (migrated) {
             runCatching {
-                dataStore.edit { it.remove(TOKEN) }
+                dataStore.edit { it.remove(legacyTokenKey) }
             }.onFailure {
                 Log.w(TAG, "failed to remove legacy gateway token key after migration")
             }
@@ -809,37 +1030,63 @@ class MacGatewayRepository(
         gatewayId: String,
         deviceId: String,
         generation: Long,
+        expectedConnection: MacGatewayConnection? = null,
     ): MacGatewayClient? {
         ready.await()
         return pairingMutex.withLock {
             val connection = _state.value.connection
             if (connection == null || generation != _connectionGeneration.value ||
-                connection.gatewayId != gatewayId || connection.deviceId != deviceId
+                connection.gatewayId != gatewayId || connection.deviceId != deviceId ||
+                (expectedConnection != null && connection != expectedConnection)
             ) return@withLock null
             client
         }
     }
 
-    private suspend fun forget(expectedClient: MacGatewayClient?, reason: MacGatewayException? = null) {
-        pairingMutex.withLock {
-            if (client !== expectedClient) return
-            val gatewayId = _state.value.connection?.gatewayId ?: dataStore.data.first()[CONNECTION]?.let {
-                MacGatewayJson.decodeFromString<MacGatewayConnection>(it).gatewayId
-            }
-            gatewayId?.let(tokenVault::delete)
-            dataStore.edit { it.clear() }
-            cloudCoordinator.restore(enabled = false, connection = null, persisted = null) {
-                _connectionGeneration.update { it + 1L }
-                client = null
-                immediatePollRequested.set(false)
-                immediatePollForceWhenDisabled.set(false)
-                soulSyncCoordinator?.resetConnectionSession()
-                _state.value = State(loaded = true, error = reason, cloudDialogueEnabled = false)
-            }
-        }
-        // Wake the polling loop so it exits. Cancelling it here would interrupt its own 401 cleanup.
-        pollWakeup.trySend(Unit)
+    private suspend fun requireClient(expectedGeneration: Long?): MacGatewayClient {
+        ready.await()
+        return pairingMutex.withLock { requireClientLocked(expectedGeneration) }
     }
+
+    private fun requireClientLocked(expectedGeneration: Long?): MacGatewayClient {
+        if (expectedGeneration != null && expectedGeneration != _connectionGeneration.value) {
+            throw MacGatewayException.Conflict("gateway_pairing_changed")
+        }
+        return client ?: throw MacGatewayException.Unreachable()
+    }
+
+    private fun storedCredential(prefs: Preferences): String? =
+        prefs[credentialKey] ?: decodeConnection(prefs[connectionKey])?.gatewayId
+
+    private fun clearPairing(prefs: MutablePreferences) {
+        prefs.remove(connectionKey)
+        prefs.remove(legacyTokenKey)
+        prefs.remove(credentialKey)
+        prefs.remove(dialogueEnabledKey)
+        prefs.remove(dialogueStateKey)
+    }
+
+    private suspend fun forget(expectedClient: MacGatewayClient?, reason: MacGatewayException? = null): Unit =
+        withContext(NonCancellable) {
+            pairingMutex.withLock {
+                if (client !== expectedClient) return@withLock
+                val credential = storedCredential(dataStore.data.first())
+                dataStore.edit { clearPairing(it) }
+                cloudCoordinator.restore(enabled = false, connection = null, persisted = null) {
+                    val next = _connectionGeneration.value + 1L
+                    _connectionGeneration.value = next
+                    client = null
+                    immediatePollRequested.set(false)
+                    immediatePollForceWhenDisabled.set(false)
+                    soulSyncCoordinator?.resetConnectionSession()
+                    _state.value = State(loaded = true, generation = next, error = reason)
+                    if (_selectedDialogueRole.value == endpointRole) _selectedDialogueRole.value = null
+                }
+                credential?.let { runCatching { tokenVault.delete(it) } }
+            }
+            pollWakeup.trySend(Unit)
+            Unit
+        }
 
     private suspend fun fetchFcmToken(): String = suspendCancellableCoroutine { continuation ->
         FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
@@ -865,9 +1112,10 @@ class MacGatewayRepository(
     private companion object {
         const val TAG = "MacGateway"
         const val REASON_FOREGROUND = "foreground"
-        val CONNECTION = stringPreferencesKey("connection")
-        val TOKEN = stringPreferencesKey("token")
-        val CLOUD_DIALOGUE_ENABLED = booleanPreferencesKey("cloud_dialogue_enabled")
-        val CLOUD_DIALOGUE_STATE = stringPreferencesKey("cloud_dialogue_state")
+        fun decodeConnection(raw: String?): MacGatewayConnection? =
+            raw?.let { runCatching { MacGatewayJson.decodeFromString<MacGatewayConnection>(it) }.getOrNull() }
+
+        fun encodeConnection(connection: MacGatewayConnection): String =
+            MacGatewayJson.encodeToString(MacGatewayConnection.serializer(), connection)
     }
 }

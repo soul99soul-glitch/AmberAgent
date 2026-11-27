@@ -1,6 +1,9 @@
 package app.amber.feature.ui.components.message
 
 import android.content.Intent
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -24,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -31,7 +35,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.draw.drawWithContent
@@ -63,6 +69,7 @@ import com.composables.icons.lucide.Play
 import app.amber.agent.R
 import app.amber.agent.Screen
 import app.amber.core.model.AssistantRegex
+import app.amber.core.settings.ReplyDeliveryMode
 import app.amber.core.ai.generative.GenerativeWidgetCopy
 import app.amber.core.ai.generative.GenerativeWidgetParser
 import app.amber.feature.ui.components.media.VideoPlaybackDialog
@@ -323,112 +330,130 @@ internal fun MessagePartsBlock(
                                     // note above for why this is "is the trailing block" rather
                                     // than "is the last Text block".
                                     val isStreamingText = loading && blockIdx == lastBlockIdx
+                                    val isSegmentedDelivery =
+                                        settings.displaySetting.replyDeliveryMode == ReplyDeliveryMode.SEGMENTED_BLOCKS
+                                    val appearedDuringLiveTurn = remember { loading }
                                     val assistantDisplayText = MessageRenderCache.displayMarkdownText(
                                         text = part.text,
                                         regexes = regexes,
                                         role = MessageRole.ASSISTANT,
                                     )
-                                    // Streaming tail text block: single-Text markdown layer
-                                    // (layout only grows, no block-tree re-layout mid-stream).
-                                    // Generation end must NOT swap the renderer while the
-                                    // pacing buffer still holds a tail: the component drains
-                                    // first. The settled MarkdownBlock then takes over as soon
-                                    // as the owning timeline reports the swap cannot move what
-                                    // the reader sees (pinned to the bottom, or this message is
-                                    // not visible). A part composed without streaming
-                                    // (scroll-back rebuild, history) starts settled.
-                                    val presentationLifetime = rememberStreamingPresentationLifetime(
-                                        streaming = isStreamingText,
-                                        settledContent = assistantDisplayText,
-                                    )
-                                    val streamingMarkdownContent: (@Composable () -> Unit)? =
-                                        if ((isStreamingText || presentationLifetime.retained) && !deferStreamingParse) {
-                                            {
-                                                presentationLifetime.MarkPresented()
-                                                StreamingSingleTextMarkdown(
-                                                    text = part.text,
-                                                    regexes = regexes,
-                                                    streaming = isStreamingText,
-                                                    onSettled = presentationLifetime.onDrained,
-                                                )
+                                    var committedSegmentedLen by remember {
+                                        mutableIntStateOf(if (isStreamingText) 0 else assistantDisplayText.length)
+                                    }
+                                    val visibleAssistantText = if (isSegmentedDelivery) {
+                                        val committed = committedSegmentedReplyPrefix(
+                                            text = assistantDisplayText,
+                                            isStreaming = isStreamingText,
+                                            previouslyCommittedLength = committedSegmentedLen,
+                                        )
+                                        if (committed.length > committedSegmentedLen) {
+                                            committedSegmentedLen = committed.length
+                                        }
+                                        committed
+                                    } else {
+                                        assistantDisplayText
+                                    }
+                                    if (visibleAssistantText.isEmpty() && isStreamingText) {
+                                        // Segmented mode holds back incomplete in-flight prose so
+                                        // the single-line 3-dot wave status stays clean until a
+                                        // complete block or full reply is ready to fade in.
+                                    } else {
+                                        // Streaming tail text block: single-Text markdown layer
+                                        // (layout only grows, no block-tree re-layout mid-stream).
+                                        // Disabled in segmented delivery mode so completed blocks
+                                        // render cleanly via MarkdownBlock without word-by-word streaming.
+                                        val presentationLifetime = rememberStreamingPresentationLifetime(
+                                            streaming = isStreamingText && !isSegmentedDelivery,
+                                            settledContent = visibleAssistantText,
+                                        )
+                                        val streamingMarkdownContent: (@Composable () -> Unit)? =
+                                            if (!isSegmentedDelivery &&
+                                                (isStreamingText || presentationLifetime.retained) &&
+                                                !deferStreamingParse
+                                            ) {
+                                                {
+                                                    presentationLifetime.MarkPresented()
+                                                    StreamingSingleTextMarkdown(
+                                                        text = part.text,
+                                                        regexes = regexes,
+                                                        streaming = isStreamingText,
+                                                        onSettled = presentationLifetime.onDrained,
+                                                    )
+                                                }
+                                            } else {
+                                                null
+                                            }
+                                        val effectiveStreaming = isStreamingText && !isSegmentedDelivery
+                                        if (settings.displaySetting.showAssistantBubble) {
+                                            val amberTokens = LocalAmberTokens.current
+                                            val themeRadius = themeBubbleRadius()
+                                            val themeBorderWidth = themeBubbleBorderWidth()
+                                            val assistantBubbleShape = RoundedCornerShape(themeRadius ?: 18.dp)
+                                            Surface(
+                                                modifier = Modifier
+                                                    .chatBubbleWidth(0.90f)
+                                                    .assistantBubbleEntrance(animate = appearedDuringLiveTurn),
+                                                shape = assistantBubbleShape,
+                                                color = amberTokens.surface,
+                                                contentColor = amberTokens.ink,
+                                                tonalElevation = 0.dp,
+                                                shadowElevation = 0.dp,
+                                                border = if (themeBorderWidth == null) {
+                                                    BorderStroke(0.5.dp, amberTokens.line)
+                                                } else {
+                                                    themeBorderWidth.takeIf { it > 0.dp }
+                                                        ?.let { BorderStroke(it, amberTokens.line) }
+                                                },
+                                            ) {
+                                                Column(modifier = Modifier.padding(horizontal = 15.dp, vertical = 12.dp)) {
+                                                    AssistantMarkdownBlockOrWidgets(
+                                                        content = visibleAssistantText,
+                                                        streaming = effectiveStreaming,
+                                                        deferStreamingParse = deferStreamingParse && effectiveStreaming,
+                                                        streamingMarkdownContent = streamingMarkdownContent,
+                                                        onClickCitation = handleClickCitation,
+                                                        onGenerativeWidgetAction = onGenerativeWidgetAction,
+                                                        onStreamingVisibleFrame = if (effectiveStreaming) {
+                                                            onStreamingVisibleFrame
+                                                        } else {
+                                                            null
+                                                        },
+                                                        onStreamingVisualActiveChange = if (
+                                                            effectiveStreaming || onStreamingVisibleFrame != null
+                                                        ) {
+                                                            onStreamingVisualActiveChange
+                                                        } else {
+                                                            null
+                                                        },
+                                                    )
+                                                }
                                             }
                                         } else {
-                                            null
+                                            AssistantMarkdownBlockOrWidgets(
+                                                content = visibleAssistantText,
+                                                modifier = Modifier.assistantBubbleEntrance(
+                                                    animate = appearedDuringLiveTurn && isSegmentedDelivery,
+                                                ),
+                                                onClickCitation = handleClickCitation,
+                                                streaming = effectiveStreaming,
+                                                deferStreamingParse = deferStreamingParse && effectiveStreaming,
+                                                streamingMarkdownContent = streamingMarkdownContent,
+                                                onGenerativeWidgetAction = onGenerativeWidgetAction,
+                                                onStreamingVisibleFrame = if (effectiveStreaming || onStreamingVisibleFrame != null) {
+                                                    onStreamingVisibleFrame
+                                                } else {
+                                                    null
+                                                },
+                                                onStreamingVisualActiveChange = if (
+                                                    effectiveStreaming || onStreamingVisibleFrame != null
+                                                ) {
+                                                    onStreamingVisualActiveChange
+                                                } else {
+                                                    null
+                                                },
+                                            )
                                         }
-                                    if (settings.displaySetting.showAssistantBubble) {
-                                        // Streaming text height animation is intentionally disabled:
-                                        // assistant markdown should grow by natural layout only, without
-                                        // a restarted spring/tween on every accumulator flush.
-                                        val amberTokens = LocalAmberTokens.current
-                                        val themeRadius = themeBubbleRadius()
-                                        val themeBorderWidth = themeBubbleBorderWidth()
-                                        val assistantBubbleShape = themeRadius?.let { RoundedCornerShape(it) }
-                                            ?: RoundedCornerShape(
-                                            topStart = 14.dp,
-                                            topEnd = 14.dp,
-                                            bottomStart = 5.dp,
-                                            bottomEnd = 14.dp,
-                                        )
-                                        Surface(
-                                            modifier = Modifier.chatBubbleWidth(0.86f),
-                                            shape = assistantBubbleShape,
-                                            color = amberTokens.surface,
-                                            contentColor = amberTokens.ink,
-                                            tonalElevation = 0.dp,
-                                            shadowElevation = 0.dp,
-                                            border = if (themeBorderWidth == null) {
-                                                BorderStroke(1.dp, amberTokens.line)
-                                            } else {
-                                                themeBorderWidth.takeIf { it > 0.dp }
-                                                    ?.let { BorderStroke(it, amberTokens.line) }
-                                            },
-                                        ) {
-                                            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                                                AssistantMarkdownBlockOrWidgets(
-                                                    content = assistantDisplayText,
-                                                    streaming = isStreamingText,
-                                                    deferStreamingParse = deferStreamingParse && isStreamingText,
-                                                    streamingMarkdownContent = streamingMarkdownContent,
-                                                    onClickCitation = handleClickCitation,
-                                                    onGenerativeWidgetAction = onGenerativeWidgetAction,
-                                                    onStreamingVisibleFrame = if (isStreamingText) {
-                                                        onStreamingVisibleFrame
-                                                    } else {
-                                                        null
-                                                    },
-                                                    onStreamingVisualActiveChange = if (
-                                                        isStreamingText || onStreamingVisibleFrame != null
-                                                    ) {
-                                                        onStreamingVisualActiveChange
-                                                    } else {
-                                                        null
-                                                    },
-                                                )
-                                            }
-                                        }
-                                    } else {
-                                        // Keep the no-bubble streaming path animation-free as well.
-                                        AssistantMarkdownBlockOrWidgets(
-                                            content = assistantDisplayText,
-                                            modifier = Modifier,
-                                            onClickCitation = handleClickCitation,
-                                            streaming = isStreamingText,
-                                            deferStreamingParse = deferStreamingParse && isStreamingText,
-                                            streamingMarkdownContent = streamingMarkdownContent,
-                                            onGenerativeWidgetAction = onGenerativeWidgetAction,
-                                            onStreamingVisibleFrame = if (isStreamingText || onStreamingVisibleFrame != null) {
-                                                onStreamingVisibleFrame
-                                            } else {
-                                                null
-                                            },
-                                            onStreamingVisualActiveChange = if (
-                                                isStreamingText || onStreamingVisibleFrame != null
-                                            ) {
-                                                onStreamingVisualActiveChange
-                                            } else {
-                                                null
-                                            },
-                                        )
                                     }
                                 }
                         }
@@ -698,3 +723,130 @@ private fun UIMessagePart.Tool.stableStepKey(): String =
     toolCallId.ifBlank {
         streamToolIndex()?.let { "stream-tool-$it" } ?: hashCode().toString()
     }
+
+/**
+ * Smooth whole-bubble fade-in + subtle upward glide when a newly generated assistant bubble
+ * appears (aligned with iOS/HarmonyOS). Historical messages skip animation (`animate == false`).
+ */
+internal fun Modifier.assistantBubbleEntrance(animate: Boolean): Modifier = composed {
+    val progress = remember { Animatable(if (animate) 0f else 1f) }
+    LaunchedEffect(Unit) {
+        if (animate && progress.value < 1f) {
+            progress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing),
+            )
+        }
+    }
+    this.graphicsLayer {
+        val p = progress.value
+        alpha = p
+        translationY = 6.dp.toPx() * (1f - p)
+    }
+}
+
+/**
+ * Segmented reply commit policy matching iOS `ChatSegmentedMarkdownCommitPolicy`:
+ * - While streaming, only commits up to completed natural Markdown boundaries (closed code/math
+ *   fences or blank-line-separated completed paragraphs/blocks). Incomplete trailing lines stay
+ *   hidden behind the inline 3-dot wave status.
+ * - Once streaming finishes (`isStreaming == false`), flushes the full text immediately.
+ */
+internal fun committedSegmentedReplyPrefix(
+    text: String,
+    isStreaming: Boolean,
+    previouslyCommittedLength: Int = 0,
+): String {
+    if (!isStreaming) return text
+    if (text.isEmpty()) return ""
+
+    val safePrevious = previouslyCommittedLength.coerceIn(0, text.length)
+    var fenceChar: Char? = null
+    var fenceLen = 0
+    var insideMathBlock = false
+    var lastNonBlankContentEnd = 0
+    var hasUncommittedBlockContent = false
+    var committedEnd = 0
+
+    var lineStart = 0
+    while (lineStart < text.length) {
+        var lineContentEnd = lineStart
+        while (lineContentEnd < text.length && text[lineContentEnd] != '\n' && text[lineContentEnd] != '\r') {
+            lineContentEnd++
+        }
+        val hasNewline = lineContentEnd < text.length
+        if (!hasNewline) break
+
+        var lineEnd = lineContentEnd + 1
+        if (text[lineContentEnd] == '\r' && lineEnd < text.length && text[lineEnd] == '\n') {
+            lineEnd++
+        }
+        val trimmed = text.substring(lineStart, lineContentEnd).trim()
+
+        // Code fence tracking (``` or ~~~)
+        if (!insideMathBlock) {
+            val first = trimmed.firstOrNull()
+            if (first == '`' || first == '~') {
+                var run = 0
+                while (run < trimmed.length && trimmed[run] == first) run++
+                if (run >= 3) {
+                    lastNonBlankContentEnd = lineContentEnd
+                    hasUncommittedBlockContent = true
+                    if (fenceChar == null) {
+                        fenceChar = first
+                        fenceLen = run
+                    } else if (fenceChar == first && run >= fenceLen && trimmed.substring(run).isBlank()) {
+                        fenceChar = null
+                        fenceLen = 0
+                        committedEnd = lineContentEnd
+                        hasUncommittedBlockContent = false
+                    }
+                    lineStart = lineEnd
+                    continue
+                }
+            }
+            if (fenceChar != null) {
+                lastNonBlankContentEnd = lineContentEnd
+                hasUncommittedBlockContent = true
+                lineStart = lineEnd
+                continue
+            }
+        }
+
+        // Display math block tracking ($$)
+        if (trimmed.startsWith("$$")) {
+            val singleLineMath = trimmed.length >= 4 && trimmed.endsWith("$$")
+            lastNonBlankContentEnd = lineContentEnd
+            hasUncommittedBlockContent = true
+            if (!singleLineMath) {
+                insideMathBlock = !insideMathBlock
+            }
+            if (!insideMathBlock) {
+                committedEnd = lineContentEnd
+                hasUncommittedBlockContent = false
+            }
+            lineStart = lineEnd
+            continue
+        }
+        if (insideMathBlock) {
+            lastNonBlankContentEnd = lineContentEnd
+            hasUncommittedBlockContent = true
+            lineStart = lineEnd
+            continue
+        }
+
+        if (trimmed.isEmpty()) {
+            if (hasUncommittedBlockContent) {
+                committedEnd = lastNonBlankContentEnd
+                hasUncommittedBlockContent = false
+            }
+        } else {
+            lastNonBlankContentEnd = lineContentEnd
+            hasUncommittedBlockContent = true
+        }
+        lineStart = lineEnd
+    }
+
+    val finalEnd = maxOf(committedEnd, safePrevious).coerceAtMost(text.length)
+    return if (finalEnd == 0) "" else text.substring(0, finalEnd)
+}

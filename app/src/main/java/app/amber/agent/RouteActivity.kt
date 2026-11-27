@@ -44,9 +44,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -75,14 +75,11 @@ import com.dokar.sonner.rememberToasterState
 import app.amber.highlight.Highlighter
 import app.amber.highlight.LocalHighlighter
 import app.amber.core.infra.PreferencesKeys
-import app.amber.core.settings.AgentRuntimeSetting
 import app.amber.core.settings.DisplaySetting
 import app.amber.core.settings.Settings
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.settingsStore
 import app.amber.core.utils.JsonInstant
-import app.amber.core.event.AppEvent
-import app.amber.core.event.AppEventBus
 import app.amber.core.memory.dream.MemoryDreamNotifier
 import app.amber.feature.ui.activity.SafeModeActivity
 import app.amber.feature.ui.context.LocalNavController
@@ -104,8 +101,6 @@ import app.amber.feature.ui.overlay.LocalAppModalOverlayHost
 import app.amber.feature.ui.overlay.rememberAppModalOverlayHostState
 import app.amber.feature.ui.pages.live.LiveCompanionDeepLink
 import app.amber.core.utils.openUrl
-import app.amber.feature.ui.pages.novel.NovelLaunchCurtain
-import app.amber.feature.board.worker.BoardNotifier
 import app.amber.feature.macgateway.ProactiveDeepLinkInbox
 import app.amber.feature.runtime.RunTerminalStore
 import app.amber.feature.ui.theme.LocalDarkMode
@@ -116,7 +111,6 @@ import app.amber.core.utils.base64Encode
 import app.amber.core.utils.CrashHandler
 import okhttp3.OkHttpClient
 import org.koin.android.ext.android.inject
-import org.koin.compose.koinInject
 import kotlin.uuid.Uuid
 
 private const val TAG = "RouteActivity"
@@ -126,14 +120,9 @@ internal const val STARTUP_THEME_REQUIRES_CUSTOM_DISPLAY_PREF = "startup_theme_r
 private const val MINIMAL_THEME_PROBE_TIMEOUT_MS = 500L
 private const val CUSTOM_THEME_READY_TIMEOUT_MS = 2_000L
 private val DEFAULT_STARTUP_DISPLAY_SETTING = DisplaySetting()
-private val DEFAULT_DEEP_READ_ACCENT = AgentRuntimeSetting().todayBoard.deepReadAccent
 private const val ROUTE_TRANSITION_DURATION_MILLIS = 320
 private val RouteTransitionEasing = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)
 private val RouteTransitionSpec = tween<IntOffset>(
-    durationMillis = ROUTE_TRANSITION_DURATION_MILLIS,
-    easing = RouteTransitionEasing,
-)
-internal val RouteTransitionSpecFloat = tween<Float>(
     durationMillis = ROUTE_TRANSITION_DURATION_MILLIS,
     easing = RouteTransitionEasing,
 )
@@ -216,22 +205,18 @@ class RouteActivity : FragmentActivity() {
             finish()
             return
         }
-        if (StandaloneSurfaces.current != StandaloneSurfaces.NOVEL &&
-            StandaloneSurfaces.current != StandaloneSurfaces.DEEP_READ
-        ) {
-            savedInstanceState?.getString(STATE_DETAIL_SIGNAL)?.let { pending ->
-                proactiveDeepLinkInbox.submit(pending, savedInstanceState.getString(STATE_DETAIL_GATEWAY),
-                    savedInstanceState.getString(STATE_DETAIL_DEVICE))
-            }
-            val coldSignalId = consumeProactiveDeepLink(
-                intent = intent,
-                inbox = proactiveDeepLinkInbox,
-                alreadyConsumed = proactiveDeepLinkConsumed,
-            )
-            if (coldSignalId != null) {
-                proactiveDeepLinkConsumed = true
-                launchedFromProactiveDeepLink = true
-            }
+        savedInstanceState?.getString(STATE_DETAIL_SIGNAL)?.let { pending ->
+            proactiveDeepLinkInbox.submit(pending, savedInstanceState.getString(STATE_DETAIL_GATEWAY),
+                savedInstanceState.getString(STATE_DETAIL_DEVICE))
+        }
+        val coldSignalId = consumeProactiveDeepLink(
+            intent = intent,
+            inbox = proactiveDeepLinkInbox,
+            alreadyConsumed = proactiveDeepLinkConsumed,
+        )
+        if (coldSignalId != null) {
+            proactiveDeepLinkConsumed = true
+            launchedFromProactiveDeepLink = true
         }
         // Phase 2 M2.0.3 fix: cold-start OAuth callback (e.g. AmberAgent's
         // process was killed during the browser handoff) lands here via
@@ -255,7 +240,7 @@ class RouteActivity : FragmentActivity() {
         // - colorMode and amoledDark are read synchronously from SharedPreferences
         //   inside AmberAgentTheme.
         // - Only non-default DataStore appearance overrides (custom base family,
-        //   accent color, themePack, or DeepRead accent) require waiting for
+        //   accent color, themePack or text weight) require waiting for
         //   SettingsAggregator before the first draw.
         // Compose setContent runs immediately so composition and settings decoding
         // overlap instead of blocking serially.
@@ -371,33 +356,18 @@ class RouteActivity : FragmentActivity() {
                 val display = rawDisplay?.let {
                     runCatching { JsonInstant.decodeFromString<DisplaySetting>(it) }.getOrNull()
                 } ?: DisplaySetting()
-                if (hasCustomDisplayAppearance(display)) {
-                    return@runCatching true
-                }
-                if (StandaloneSurfaces.current == StandaloneSurfaces.DEEP_READ) {
-                    val rawAgent = prefs[PreferencesKeys.AGENT_RUNTIME]
-                    val agent = rawAgent?.let {
-                        runCatching { JsonInstant.decodeFromString<AgentRuntimeSetting>(it) }.getOrNull()
-                    }
-                    return@runCatching agent != null &&
-                        agent.todayBoard.deepReadAccent != DEFAULT_DEEP_READ_ACCENT
-                }
-                false
+                hasCustomDisplayAppearance(display)
             }.getOrDefault(true)
         }
 
-    private fun requiresCustomStartupTheme(settings: Settings): Boolean {
-        if (hasCustomDisplayAppearance(settings.displaySetting)) return true
-        if (StandaloneSurfaces.current == StandaloneSurfaces.DEEP_READ) {
-            return settings.agentRuntime.todayBoard.deepReadAccent != DEFAULT_DEEP_READ_ACCENT
-        }
-        return false
-    }
+    private fun requiresCustomStartupTheme(settings: Settings): Boolean =
+        hasCustomDisplayAppearance(settings.displaySetting)
 
     private fun hasCustomDisplayAppearance(display: DisplaySetting): Boolean {
         return display.amberBaseFamily != DEFAULT_STARTUP_DISPLAY_SETTING.amberBaseFamily ||
             display.accentColor != DEFAULT_STARTUP_DISPLAY_SETTING.accentColor ||
-            display.themePack != null
+            display.themePack != null ||
+            display.textWeight != DEFAULT_STARTUP_DISPLAY_SETTING.textWeight
     }
 
     private fun disableNavigationBarContrast() {
@@ -428,13 +398,13 @@ class RouteActivity : FragmentActivity() {
         intent.data?.takeIf { it.scheme == "amberagent" && it.host == "oauth" }?.let { uri ->
             oauthCallbackDispatcher.dispatch(uri)
         }
-        launchedFromProactiveDeepLink = !StandaloneSurfaces.isStandalone && consumeProactiveDeepLink(
+        launchedFromProactiveDeepLink = consumeProactiveDeepLink(
             intent = intent,
             inbox = proactiveDeepLinkInbox,
         ) != null
         proactiveDeepLinkConsumed = launchedFromProactiveDeepLink
         val notification = notificationDeepLinkFrom(intent)
-        val target = explicitIntentScreen(intent, notification, coldStart = false)
+        val target = explicitIntentScreen(intent, notification)
         when {
             target is Screen.Chat -> {
                 openExternalChat(target)
@@ -445,7 +415,7 @@ class RouteActivity : FragmentActivity() {
                 if (target == Screen.LiveCompanion) LiveCompanionDeepLink.request()
                 if (navStack?.lastOrNull() != target) navStack?.add(target)
             }
-            !StandaloneSurfaces.isStandalone -> app.amber.feature.tools.DynamicShortcutPublisher.screenFromIntent(intent)?.let {
+            else -> app.amber.feature.tools.DynamicShortcutPublisher.screenFromIntent(intent)?.let {
                 navigateToShortcutRoute(it, intent)
             }
         }
@@ -492,13 +462,7 @@ class RouteActivity : FragmentActivity() {
         } else null,
     )
 
-    private fun explicitIntentScreen(intent: Intent, notificationLink: NotificationDeepLink?, coldStart: Boolean): Screen? {
-        // Standalone products (app.amber.novel / app.amber.deepread) resolve
-        // only their own surface deep-links; everything else lands on the
-        // product home.
-        if (StandaloneSurfaces.isStandalone) {
-            return standaloneStartScreen(intent, fallbackToHome = coldStart)
-        }
+    private fun explicitIntentScreen(intent: Intent, notificationLink: NotificationDeepLink?): Screen? {
         if (launchedFromProactiveDeepLink) {
             return Screen.PersonalAgent
         }
@@ -517,19 +481,10 @@ class RouteActivity : FragmentActivity() {
         if (intent.getBooleanExtra(MemoryDreamNotifier.EXTRA_OPEN_AGENT_MEMORY, false)) {
             return Screen.SettingAgentMemory
         }
-        if (intent.getBooleanExtra(BoardNotifier.EXTRA_OPEN_TODAY_BOARD, false)) {
-            return Screen.TodayBoard
-        }
         if (intent.getBooleanExtra(EXTRA_OPEN_LIVE_COMPANION, false)) {
             return Screen.LiveCompanion
         }
         taskSessionScreenFromIntent(intent)?.let { screen ->
-            return screen
-        }
-        deepReadScreenFromIntent(intent)?.let { screen ->
-            return screen
-        }
-        app.amber.feature.novel.workspace.NovelWorkspaceNotificationRoute.screenFrom(intent)?.let { screen ->
             return screen
         }
         return null
@@ -588,7 +543,6 @@ class RouteActivity : FragmentActivity() {
     fun AppRoutes() {
         val toastState = rememberToasterState()
         val settings by settingsStore.settingsFlow.collectAsStateWithLifecycle()
-        val eventBus = koinInject<AppEventBus>()
         // One app-level modal layer above every route (and above the two-pane list) so a route's
         // modal scrim covers the whole interactive window. The owning route publishes the content;
         // the shell keeps no modal-specific state.
@@ -600,7 +554,7 @@ class RouteActivity : FragmentActivity() {
             if (ChatPerfHomeEntry.enabled && intent?.getStringExtra("perfPathId") == HOME_FIRST_PATH) {
                 return@remember Screen.SessionHome
             }
-            explicitIntentScreen(intent, notificationLink, coldStart = true)?.let { return@remember it }
+            explicitIntentScreen(intent, notificationLink)?.let { return@remember it }
             app.amber.feature.tools.DynamicShortcutPublisher.screenFromIntent(intent)?.let { route ->
                 return@remember shortcutStartScreen(route)
             }
@@ -628,7 +582,10 @@ class RouteActivity : FragmentActivity() {
                 initialBackStackFor(startScreen = startScreen, startMode = startMode)
             }
         }
-        val backStack = rememberNavBackStack(*initialBackStack.toTypedArray())
+        // Older saved stacks can contain route keys this version cannot deserialize.
+        val backStack = key("main-navigation") {
+            rememberNavBackStack(*initialBackStack.toTypedArray())
+        }
         val navigator = remember(backStack) { Navigator(backStack) }
         val navigationEntries = remember { appNavigationEntries() }
         var currentIntent by remember { mutableStateOf(intent) }
@@ -659,26 +616,6 @@ class RouteActivity : FragmentActivity() {
             this@RouteActivity.navStack = backStack
             this@RouteActivity.newIntentHandler = { currentIntent = it }
         }
-        LaunchedEffect(backStack) {
-            eventBus.events.collect { event ->
-                when (event) {
-                    // MCP OAuth 回调由 McpOAuthCoordinator 订阅消费，这里无需处理
-                    is AppEvent.McpOAuthCallback -> Unit
-                    is AppEvent.OpenDeepRead -> backStack.add(
-                        Screen.DeepRead(
-                            topicId = event.topicId,
-                            title = event.title,
-                            sourceUrl = event.sourceUrl,
-                            forceRegenerate = event.forceRegenerate,
-                        )
-                    )
-                    // P6-02: handled by the chat screen (ChatPage), which
-                    // routes it to the conversation owning the source image.
-                    is AppEvent.EditGeneratedImage -> Unit
-                }
-            }
-        }
-
         RouteShareDelivery(
             currentIntent = currentIntent,
             isConsumed = { shareIntentConsumed },
@@ -734,16 +671,6 @@ class RouteActivity : FragmentActivity() {
                         predictivePopTransitionSpec = { routePopTransition() },
                         entryProvider = navigationEntries,
                     )
-                }
-                if (StandaloneSurfaces.current == StandaloneSurfaces.NOVEL) {
-                    // Cold-launch seal curtain — once per launch, skipped under
-                    // reduce-motion/TalkBack inside the composable itself.
-                    var curtainDone by rememberSaveable { mutableStateOf(false) }
-                    if (!curtainDone) {
-                        NovelLaunchCurtain(
-                            onFinish = { curtainDone = true },
-                        )
-                    }
                 }
                 AppModalOverlayHost(appModalOverlay)
                 }

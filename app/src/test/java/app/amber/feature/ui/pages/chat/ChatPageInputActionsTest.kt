@@ -83,7 +83,7 @@ class ChatPageInputActionsTest {
     }
 
     @Test
-    fun deepReadModelBypassAppliesToNewMessagesAndNotEditRegeneration() = runBlocking {
+    fun formerDeepReadCommandRequiresChatModelForSendAndEdit() = runBlocking {
         val input = ChatInputState().apply { bindToConversation("conversation-a") }
         val errors = mutableListOf<Int>()
         var sends = 0
@@ -104,11 +104,11 @@ class ChatPageInputActionsTest {
         )
         val parts = listOf(UIMessagePart.Text("/deepread https://example.org/article"))
 
-        assertTrue(actions.send(PendingUserMessageMode.FOLLOWUP, parts, null))
+        assertFalse(actions.send(PendingUserMessageMode.FOLLOWUP, parts, null))
         assertFalse(actions.send(PendingUserMessageMode.FOLLOWUP, parts, Uuid.random()))
-        assertEquals(1, sends)
+        assertEquals(0, sends)
         assertEquals(0, edits)
-        assertEquals(listOf(R.string.chat_setup_missing_model), errors)
+        assertEquals(List(2) { R.string.chat_setup_missing_model }, errors)
     }
 
     private fun actions(

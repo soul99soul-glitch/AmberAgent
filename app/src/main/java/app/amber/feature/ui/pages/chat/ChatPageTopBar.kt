@@ -2,8 +2,6 @@ package app.amber.feature.ui.pages.chat
 
 import app.amber.core.model.Conversation
 import kotlinx.coroutines.flow.StateFlow
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
@@ -32,7 +30,6 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -57,7 +54,6 @@ import app.amber.ai.core.MessageRole
 import app.amber.ai.provider.Model
 import app.amber.ai.registry.ModelRegistry
 import com.composables.icons.lucide.Lucide
-import com.composables.icons.lucide.ArrowDown
 import com.composables.icons.lucide.MessagesSquare
 import app.amber.agent.R
 import app.amber.core.context.ContextFootprintEstimator
@@ -70,7 +66,6 @@ internal fun ChatPageTopBar(
     conversationFlow: StateFlow<Conversation>,
     bigScreen: Boolean,
     onBack: () -> Unit,
-    currentChatModel: Model?,
     generating: Boolean,
     processingStatus: String?,
     recapEligible: Boolean,
@@ -78,11 +73,9 @@ internal fun ChatPageTopBar(
     shelfOpen: Boolean,
     activityOpen: Boolean,
     otherActivityCount: Int,
-    modelMenuOpen: Boolean,
     soulDisplayName: String = "Amber",
     soulIsDefault: Boolean = true,
     onOpenAgentSoul: () -> Unit = {},
-    onToggleModelMenu: () -> Unit,
     onIslandOpenRecap: () -> Unit,
     onIslandJumpToLive: () -> Unit,
     onIslandStop: () -> Unit,
@@ -102,7 +95,6 @@ internal fun ChatPageTopBar(
         hasMessages = header.second,
         bigScreen = bigScreen,
         onBack = onBack,
-        currentChatModel = currentChatModel,
         generating = generating,
         processingStatus = processingStatus,
         recapEligible = recapEligible,
@@ -110,11 +102,9 @@ internal fun ChatPageTopBar(
         shelfOpen = shelfOpen,
         activityOpen = activityOpen,
         otherActivityCount = otherActivityCount,
-        modelMenuOpen = modelMenuOpen,
         soulDisplayName = soulDisplayName,
         soulIsDefault = soulIsDefault,
         onOpenAgentSoul = onOpenAgentSoul,
-        onToggleModelMenu = onToggleModelMenu,
         onIslandOpenRecap = onIslandOpenRecap,
         onIslandJumpToLive = onIslandJumpToLive,
         onIslandStop = onIslandStop,
@@ -191,7 +181,6 @@ private fun TopBar(
     hasMessages: Boolean,
     bigScreen: Boolean,
     onBack: () -> Unit,
-    currentChatModel: Model?,
     generating: Boolean,
     processingStatus: String?,
     recapEligible: Boolean,
@@ -199,11 +188,9 @@ private fun TopBar(
     shelfOpen: Boolean,
     activityOpen: Boolean,
     otherActivityCount: Int,
-    modelMenuOpen: Boolean,
     soulDisplayName: String,
     soulIsDefault: Boolean,
     onOpenAgentSoul: () -> Unit,
-    onToggleModelMenu: () -> Unit,
     onIslandOpenRecap: () -> Unit,
     onIslandJumpToLive: () -> Unit,
     onIslandStop: () -> Unit,
@@ -246,7 +233,7 @@ private fun TopBar(
                     Spacer(Modifier.size(48.dp))
                 }
 
-                // Two touch targets: the island (status / recap) and the model row below it.
+                // The island handles conversation activity and recap; the row opens the persona.
                 Column(
                     modifier = Modifier
                         .weight(1f)
@@ -265,85 +252,39 @@ private fun TopBar(
                         onJumpToLive = onIslandJumpToLive,
                         onStop = onIslandStop,
                     )
-                    // Graphite §6.2 ChatHeader model-id trigger: mono model-id + a chevron that
-                    // rotates 180° while the TopModelMenu dropdown is open. Tapping toggles it
-                    // (the dropdown itself is rendered in the content area, anchored under header).
-                    val chevronRotation by animateFloatAsState(
-                        targetValue = if (modelMenuOpen) 180f else 0f,
-                        animationSpec = tween(durationMillis = 280),
-                        label = "modelMenuChevron",
-                    )
                     Row(
+                        modifier = Modifier
+                            .heightIn(min = 28.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .testTag("chat-header-agent-soul")
+                            .clickable { onOpenAgentSoul() }
+                            .padding(horizontal = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
-                        Row(
+                        Box(
                             modifier = Modifier
-                                .heightIn(min = 28.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .testTag("chat-header-model-menu")
-                                .clickable { onToggleModelMenu() }
-                                .padding(horizontal = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            Text(
-                                text = currentChatModel?.modelId
-                                    ?: stringResource(R.string.model_list_select_model),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                style = amberType.meta.copy(
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium,
+                                .size(6.dp)
+                                .clip(androidx.compose.foundation.shape.CircleShape)
+                                .background(
+                                    if (soulIsDefault) amberTokens.ink3.copy(alpha = 0.55f)
+                                    else amberTokens.accent,
                                 ),
-                                // ink3↔ink2 中点：ink3 偏淡、ink2 偏深，取中间的暖中灰
-                                color = lerp(amberTokens.ink3, amberTokens.ink2, 0.5f),
-                                modifier = Modifier.weight(1f, fill = false),
-                            )
-                            Icon(
-                                imageVector = Lucide.ArrowDown,
-                                contentDescription = null,
-                                tint = amberTokens.ink3,
-                                // 箭头 14→13，陪着字号一起缩
-                                modifier = Modifier
-                                    .size(13.dp)
-                                    .rotate(chevronRotation),
-                            )
-                        }
-                        Row(
-                            modifier = Modifier
-                                .heightIn(min = 28.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .testTag("chat-header-agent-soul")
-                                .clickable { onOpenAgentSoul() }
-                                .padding(horizontal = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(6.dp)
-                                    .clip(androidx.compose.foundation.shape.CircleShape)
-                                    .background(
-                                        if (soulIsDefault) amberTokens.ink3.copy(alpha = 0.55f)
-                                        else amberTokens.accent,
-                                    ),
-                            )
-                            Text(
-                                text = if (soulIsDefault) "形象人设" else soulDisplayName.ifBlank { "形象人设" },
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                style = amberType.secondary.copy(
-                                    fontSize = 11.sp,
-                                    fontWeight = if (soulIsDefault) FontWeight.Medium else FontWeight.SemiBold,
-                                ),
-                                color = if (soulIsDefault) {
-                                    lerp(amberTokens.ink3, amberTokens.ink2, 0.5f)
-                                } else {
-                                    amberTokens.accent
-                                },
-                            )
-                        }
+                        )
+                        Text(
+                            text = if (soulIsDefault) "形象人设" else soulDisplayName.ifBlank { "形象人设" },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = amberType.secondary.copy(
+                                fontSize = 11.sp,
+                                fontWeight = if (soulIsDefault) FontWeight.Medium else FontWeight.SemiBold,
+                            ),
+                            color = if (soulIsDefault) {
+                                lerp(amberTokens.ink3, amberTokens.ink2, 0.5f)
+                            } else {
+                                amberTokens.accent
+                            },
+                        )
                     }
                 }
 

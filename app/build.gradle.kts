@@ -36,6 +36,7 @@ val uploadCrashlyticsMapping = projectProperty("uploadCrashlyticsMapping", "UPLO
     .ifBlank { "true" }
     .toBooleanStrict()
 val baseApplicationId = "app.amber.agent"
+val fullFlavor = "full"
 val graphiteDebugApplicationIdSuffix = ".graphite"
 val chatDeviceFixtureEnabled =
     project.findProperty("chatDeviceFixture")?.toString()?.toBoolean() == true
@@ -62,26 +63,11 @@ if (chatPerfFixtureEnabled) amberUiBuildTypes += "perffixture"
 // Populated by `applyAmberUiBuildConfig(...)` invocations; compared against
 // `amberUiBuildTypes` after configuration.
 val amberUiBuildConfigApplied = mutableSetOf<String>()
-// Per-variant Firebase client lookup. With the `surface` flavor dimension the
-// process<Variant>GoogleServices task name carries the flavor (e.g.
-// processNovelDebugGoogleServices) and the expected package = flavor
-// applicationId + buildType applicationIdSuffix. Standalone flavors can drop
-// their own client json into app/src/<flavor>/google-services.json; until then
-// their process tasks skip exactly like the graphite debug variant already does.
-val surfaceFlavorApplicationIds = linkedMapOf(
-    "full" to baseApplicationId,
-    "novel" to "app.amber.novel",
-    "deepread" to "app.amber.deepread",
-)
 val buildTypeApplicationIdSuffixes = mapOf(
     "debug" to graphiteDebugApplicationIdSuffix,
     "baseline" to ".debug",
     "perffixture" to ".perffixture",
 )
-
-fun googleServicesPackageFor(flavorName: String?, buildTypeName: String?): String =
-    surfaceFlavorApplicationIds[flavorName.orEmpty()].orEmpty() +
-        buildTypeApplicationIdSuffixes[buildTypeName].orEmpty()
 
 fun googleServicesFiles(variant: String): List<File> = listOf(
     file("src/$variant/google-services.json"),
@@ -192,26 +178,11 @@ android {
         }
     }
 
-    // Standalone product split — mirrors the iOS AmberNovel / AmberDeepRead
-    // targets. One codebase, three installable products; each standalone flavor
-    // gets its own applicationId + sandbox and gates its start surface via
-    // StandaloneSurfaces (BuildConfig.STANDALONE_SURFACE).
+    // Keep the full flavor's task names and APK paths for CI and local scripts.
     flavorDimensions += "surface"
     productFlavors {
-        create("full") {
+        create(fullFlavor) {
             dimension = "surface"
-            // Canonical Amber product — inherits defaultConfig.applicationId.
-            buildConfigField("String", "STANDALONE_SURFACE", "\"full\"")
-        }
-        create("novel") {
-            dimension = "surface"
-            applicationId = "app.amber.novel"
-            buildConfigField("String", "STANDALONE_SURFACE", "\"novel\"")
-        }
-        create("deepread") {
-            dimension = "surface"
-            applicationId = "app.amber.deepread"
-            buildConfigField("String", "STANDALONE_SURFACE", "\"deepread\"")
         }
     }
 
@@ -422,8 +393,7 @@ android {
             }
         }
         getByName("test") {
-            // Shared iOS/Android golden fixtures live at repo-root test-fixtures/
-            // (same wiring as :feature:novel).
+            // Shared iOS/Android golden fixtures live at repo-root test-fixtures/.
             resources.srcDir(rootProject.file("test-fixtures"))
         }
     }
@@ -438,6 +408,8 @@ android {
     }
     packaging {
         jniLibs {
+            // Ignore the retired reader library from builds that reuse this checkout's JNI output.
+            excludes.add("**/libreader_extractor.so")
             // proot execve() needs the loader in the installer's executable
             // nativeLibraryDir. Android 10+ denies exec from writable app data.
             // Compressed JNI is extracted at install time; 16 KB ELF alignment
@@ -473,34 +445,23 @@ baselineProfile {
 }
 
 androidComponents {
-    // Prune the variant matrix: standalone flavors only need debug (local
-    // testing), graphite (canonical applicationId install) and release
-    // (distribution). The full flavor keeps every existing build type.
-    beforeVariants { variant ->
-        if (variant.flavorName != "full" &&
-            variant.buildType !in setOf("debug", "graphite", "release")
-        ) {
-            variant.enable = false
-        }
-    }
     onVariants { variant ->
-        val flavorName = variant.flavorName.orEmpty()
         val buildTypeName = variant.buildType.orEmpty()
-        val packageName = googleServicesPackageFor(flavorName, buildTypeName)
+        val packageName = baseApplicationId + buildTypeApplicationIdSuffixes[buildTypeName].orEmpty()
         val taskName = "process${variant.name.replaceFirstChar { it.uppercase() }}GoogleServices"
         tasks.matching { it.name == taskName }.configureEach {
-            if (flavorName == "full" && buildTypeName == "release") {
+            if (buildTypeName == "release") {
                 doFirst("require release google-services client") {
-                    if (googleServicesClientForVariant(packageName, variant.name, flavorName, buildTypeName) == null) {
+                    if (googleServicesClientForVariant(packageName, variant.name, fullFlavor, buildTypeName) == null) {
                         throw GradleException(
-                            "Release builds require app/src/$flavorName/google-services.json or app/google-services.json " +
+                            "Release builds require app/src/$fullFlavor/google-services.json or app/google-services.json " +
                                 "to contain a Firebase client for $packageName."
                         )
                     }
                 }
             } else {
                 onlyIf("google-services.json contains a Firebase client for $packageName") {
-                    googleServicesClientForVariant(packageName, variant.name, flavorName, buildTypeName) != null
+                    googleServicesClientForVariant(packageName, variant.name, fullFlavor, buildTypeName) != null
                 }
             }
         }
@@ -570,8 +531,6 @@ val cargoBuildMarkdownParser =
     registerCargoBuild("cargoBuildMarkdownParser", "../native/markdown-parser", "markdown_parser")
 val cargoBuildRegexTransformer =
     registerCargoBuild("cargoBuildRegexTransformer", "../native/regex-transformer", "regex_transformer")
-val cargoBuildReaderExtractor =
-    registerCargoBuild("cargoBuildReaderExtractor", "../native/reader-extractor", "reader_extractor")
 val cargoBuildSyncCrypto =
     registerCargoBuild("cargoBuildSyncCrypto", "../native/sync-crypto", "sync_crypto")
 val cargoBuildMarkdownPreprocess =
@@ -583,7 +542,6 @@ afterEvaluate {
     tasks.named("preBuild").configure {
         dependsOn(cargoBuildMarkdownParser)
         dependsOn(cargoBuildRegexTransformer)
-        dependsOn(cargoBuildReaderExtractor)
         dependsOn(cargoBuildSyncCrypto)
         dependsOn(cargoBuildMarkdownPreprocess)
         dependsOn(cargoBuildHtmlDiffNormalizer)
@@ -596,7 +554,6 @@ val requiredRustSharedLibraries = listOf(
     "markdown_parser",
     "markdown_preprocess",
     "office_parsers",
-    "reader_extractor",
     "regex_transformer",
     "sync_crypto",
 )
@@ -604,19 +561,8 @@ val requiredRustSharedLibraries = listOf(
 val rustNativeCheckedBuildTypes = setOf("release", "graphite", "baseline")
 val pageSizeCheckedBuildTypes = setOf("debug", "release", "graphite", "baseline")
 
-// Flavor-aware variant matrix: novel/deepread have no `baseline` variant
-// (pruned in androidComponents.beforeVariants above).
-fun variantSlugsFor(buildTypes: Set<String>) = surfaceFlavorApplicationIds.keys.flatMap { flavorName ->
-    buildTypes
-        .filter { buildTypeName -> flavorName == "full" || buildTypeName != "baseline" }
-        .map { buildTypeName -> flavorName to buildTypeName }
-}
-
-val rustCheckedVariantSlugs = variantSlugsFor(rustNativeCheckedBuildTypes)
-val pageSizeCheckedVariantSlugs = variantSlugsFor(pageSizeCheckedBuildTypes)
-
-fun apkOutputs(flavorName: String, buildTypeName: String): List<File> {
-    val apkDir = layout.buildDirectory.dir("outputs/apk/$flavorName/$buildTypeName").get().asFile
+fun apkOutputs(buildTypeName: String): List<File> {
+    val apkDir = layout.buildDirectory.dir("outputs/apk/$fullFlavor/$buildTypeName").get().asFile
     return apkDir.listFiles { file ->
         file.isFile && file.extension.equals("apk", ignoreCase = true)
     }?.toList().orEmpty()
@@ -777,15 +723,15 @@ fun verifyApk16KbPageSize(apk: File): List<String> {
 }
 
 afterEvaluate {
-    rustCheckedVariantSlugs.forEach { (flavorName, buildTypeName) ->
-        val variantSlug = "$flavorName${buildTypeName.replaceFirstChar { it.uppercase() }}"
+    rustNativeCheckedBuildTypes.forEach { buildTypeName ->
+        val variantSlug = "$fullFlavor${buildTypeName.replaceFirstChar { it.uppercase() }}"
         val capitalized = variantSlug.replaceFirstChar { it.uppercase() }
         val verifyTask = tasks.register("verify${capitalized}RustNativeLibs") {
             group = "verification"
             description = "Fail $variantSlug APK builds when required Rust .so files are missing"
             dependsOn("package$capitalized")
             doLast {
-                val apks = apkOutputs(flavorName, buildTypeName)
+                val apks = apkOutputs(buildTypeName)
                 if (apks.isEmpty()) {
                     throw GradleException("No APKs found for $variantSlug; cannot verify Rust native libs")
                 }
@@ -818,15 +764,15 @@ afterEvaluate {
         }
     }
 
-    pageSizeCheckedVariantSlugs.forEach { (flavorName, buildTypeName) ->
-        val variantSlug = "$flavorName${buildTypeName.replaceFirstChar { it.uppercase() }}"
+    pageSizeCheckedBuildTypes.forEach { buildTypeName ->
+        val variantSlug = "$fullFlavor${buildTypeName.replaceFirstChar { it.uppercase() }}"
         val capitalized = variantSlug.replaceFirstChar { it.uppercase() }
         val verifyTask = tasks.register("verify${capitalized}NativePageSize") {
             group = "verification"
             description = "Fail $variantSlug APKs whose native libs are not 16 KB ELF/zip aligned"
             dependsOn("package$capitalized")
             doLast {
-                val apks = apkOutputs(flavorName, buildTypeName)
+                val apks = apkOutputs(buildTypeName)
                 if (apks.isEmpty()) {
                     throw GradleException("No APKs found for $variantSlug; cannot verify 16 KB page size")
                 }
@@ -1132,7 +1078,6 @@ dependencies {
     implementation(project(":core:ai-prompts"))
     implementation(project(":feature:subagent"))
     implementation(project(":feature:tools:impl"))
-    implementation(project(":feature:board:impl"))
     implementation(project(":feature:runtime:api"))
     implementation(project(":feature:tools:api"))
     implementation(project(":feature:terminal"))
@@ -1144,7 +1089,6 @@ dependencies {
     implementation(project(":feature:task"))
     implementation(project(":feature:workspace"))
     implementation(project(":feature:icloud"))
-    implementation(project(":feature:novel"))
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar", "*.aar"))))
     implementation(kotlin("reflect"))
 

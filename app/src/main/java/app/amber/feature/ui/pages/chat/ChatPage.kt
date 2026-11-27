@@ -29,6 +29,7 @@ import app.amber.ai.ui.UIMessagePart
 import app.amber.core.event.AppEvent
 import app.amber.core.event.AppEventBus
 import app.amber.agent.R
+import app.amber.feature.macgateway.GatewayEndpointRole
 import app.amber.core.files.FilesManager
 import app.amber.core.model.Conversation
 import app.amber.feature.ui.adaptive.LocalTwoPaneLayout
@@ -51,21 +52,22 @@ import kotlin.uuid.Uuid
 
 data class PersonalAgentTopBarState(
     val title: String,
-    val modelShortName: String?,
     val generating: Boolean,
-    val recapEligible: Boolean,
     val soulDisplayName: String,
+    val shelfOpen: Boolean,
+    val shelfItemCount: Int,
     val onOpenWorkspace: () -> Unit,
     val onOpenAgentSoul: () -> Unit,
-    val onToggleModelMenu: () -> Unit,
-    val onOpenRecap: () -> Unit,
+    val onTopicClick: () -> Unit,
+    val onStop: () -> Unit,
+    val onToggleShelf: () -> Unit,
 )
 
 sealed interface ChatStageMode {
     data object Standard : ChatStageMode
     data class PersonalAgent(
         val topChrome: @Composable (PersonalAgentTopBarState) -> Unit,
-        val bottomChrome: @Composable (imeVisible: Boolean) -> Unit,
+        val bottomChrome: @Composable () -> Unit,
         val workspaceSheet: @Composable (
             visible: Boolean,
             hasMessages: Boolean,
@@ -74,6 +76,9 @@ sealed interface ChatStageMode {
             onToggleShelf: () -> Unit,
             onOpenAgentSoul: () -> Unit,
         ) -> Unit,
+        val dialogueRole: GatewayEndpointRole? = null,
+        val dialogueGeneration: Long? = null,
+        val isModeOverlayOpen: Boolean = false,
     ) : ChatStageMode
 }
 

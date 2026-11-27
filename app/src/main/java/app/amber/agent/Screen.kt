@@ -56,30 +56,6 @@ sealed interface Screen : NavKey {
     @Serializable
     data object LiveCompanion : Screen
 
-    /** Configure LAN connection to a Mac-hosted Synara workbench. */
-    @Serializable
-    data object SynaraCompanion : Screen
-
-    /**
-     * Full-screen WebView of the remote Synara workbench.
-     * Connection is passed on the route so open does not race DataStore / ViewModel init.
-     */
-    @Serializable
-    data class SynaraWorkspace(
-        val host: String,
-        val port: Int = 3773,
-        val token: String = "",
-        val useHttps: Boolean = false,
-    ) : Screen
-
-    /** Paste a 智谱 ZCode share URL and open its mobile web UI. */
-    @Serializable
-    data object ZCode : Screen
-
-    /** Full-screen ZCode WebView (no Amber chrome). */
-    @Serializable
-    data class ZCodeSession(val url: String) : Screen
-
     @Serializable
     data object Setting : Screen
 
@@ -139,6 +115,9 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data object SettingAgentRuntimeTasks : Screen
+
+    @Serializable
+    data object PersonalAgentTasks : Screen
 
     @Serializable
     data object SettingAgentExecution : Screen
@@ -235,20 +214,7 @@ sealed interface Screen : NavKey {
     data object Stats : Screen
 
     @Serializable
-    data object TodayBoard : Screen
-
-    @Serializable
     data object MiniAppList : Screen
-
-    @Serializable
-    data object NovelProjects : Screen
-
-    @Serializable
-    data class NovelMarkdown(
-        val projectId: String,
-        val branchSlug: String? = null,
-        val jobId: String? = null,
-    ) : Screen
 
     @Serializable
     data class MiniAppRunner(val appId: String) : Screen
@@ -258,25 +224,4 @@ sealed interface Screen : NavKey {
 
     @Serializable
     data class MiniAppSettingsDetail(val group: String) : Screen
-
-    @Serializable
-    data object DeepReadTemplateWorkbench : Screen
-
-    @Serializable
-    data class DeepRead(
-        val topicId: String,
-        val title: String,
-        val sourceUrl: String? = null,
-        val forceRegenerate: Boolean = false,
-        val fromHistory: Boolean = false,
-    ) : Screen
-
-    @Serializable
-    data object DeepReadHistory : Screen
-
-    @Serializable
-    data object SettingTodayBoard : Screen
-
-    @Serializable
-    data class SettingTodayBoardDetail(val pane: String) : Screen
 }

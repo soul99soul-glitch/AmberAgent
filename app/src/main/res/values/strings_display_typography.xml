@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="setting_typography_group">Typography</string>
+    <string name="setting_typography_weight">Text weight</string>
+    <string name="setting_typography_weight_system">System</string>
+    <string name="setting_typography_weight_lighter">Lighter</string>
+    <string name="setting_typography_weight_heavier">Heavier</string>
+    <string name="setting_typography_family_system">System font</string>
+    <string name="setting_typography_preview">**今日计划 · Today**\n\n14:30 和 Amber 一起整理 3 条笔记。</string>
+    <string name="setting_display_reply_delivery_mode_title">Reply presentation</string>
+    <string name="setting_display_reply_delivery_live">Live streaming</string>
+    <string name="setting_display_reply_delivery_segmented">Segmented blocks</string>
+    <string name="setting_display_agent_bubble_title">Agent bubble mode</string>
+    <string name="setting_display_agent_bubble_desc">Present Agent replies in rounded bubble cards</string>
+    <string name="setting_display_thinking_disabled_in_segmented_desc">Thinking stays collapsed in segmented mode. Switch back to live streaming to auto-expand.</string>
+    <string name="chat_inline_status_preparing_reply">Preparing reply</string>
+</resources>

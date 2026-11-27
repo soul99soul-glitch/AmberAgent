@@ -6,7 +6,6 @@ members = [
     "markdown-parser",
     "highlight-parser",
     "regex-transformer",
-    "reader-extractor",
     "sync-crypto",
     "markdown-preprocess",
     "html-diff-normalizer",
@@ -91,7 +90,7 @@ tree-sitter-css = "0.25"
 # crates.io `tree-sitter-sql` stops at 0.0.2; the maintained fork is `tree-sitter-sequel`.
 tree-sitter-sequel = "0.3"
 
-# Component #9 — reader-extractor
+# HTML parser used by html-diff-normalizer.
 scraper = "0.22"
 
 [profile.release]

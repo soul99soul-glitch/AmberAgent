@@ -11,8 +11,6 @@ import app.amber.core.settings.Settings
 import app.amber.core.settings.findProvider
 import app.amber.core.settings.prefs.SettingsAggregator
 import app.amber.core.settings.resolveTaskChatModel
-import app.amber.feature.board.boardRequestBodies
-import app.amber.feature.board.boardRequestHeaders
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withTimeout
@@ -51,8 +49,8 @@ class SubAgentDockLocalizer private constructor(
                         reasoningLevel = ReasoningLevel.OFF,
                         maxTokens = MAX_OUTPUT_TOKENS,
                         tools = emptyList(),
-                        customHeaders = model.boardRequestHeaders(settings.providers),
-                        customBody = model.boardRequestBodies(settings.providers),
+                        customHeaders = model.requestHeaders(settings.providers),
+                        customBody = model.requestBodies(settings.providers),
                     ),
                 )
             response.choices.firstOrNull()?.message?.toText().orEmpty()

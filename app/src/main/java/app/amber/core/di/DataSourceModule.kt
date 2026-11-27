@@ -71,13 +71,10 @@ import app.amber.feature.home.ContinueCandidateAggregator
 import app.amber.feature.home.ContinueCandidateSource
 import app.amber.feature.home.ContinueDismissStore
 import app.amber.feature.home.CouncilContinueSource
-import app.amber.feature.home.DeepReadContinueSource
 import app.amber.feature.home.ImageGenerationContinueSource
 import app.amber.feature.home.MiniAppDraftContinueSource
 import app.amber.feature.home.MiniAppRunnerContinueSource
-import app.amber.feature.home.NovelWorkspaceContinueSource
 import app.amber.feature.home.RoomContinueDismissStore
-import app.amber.feature.board.hotlist.deepread.DeepReadScheduler
 import app.amber.feature.ui.theme.SettingsAggregatorThemeStore
 import app.amber.feature.ui.theme.ThemePackageManager
 import app.amber.feature.ui.theme.ThemeSettingsStore
@@ -391,30 +388,6 @@ val dataSourceModule = module {
 
     single {
         get<AppDatabase>().feishuDocDependencyDao()
-    }
-
-    single {
-        get<AppDatabase>().boardSignalDao()
-    }
-
-    single {
-        get<AppDatabase>().boardItemDao()
-    }
-
-    single {
-        get<AppDatabase>().boardFocusRuleDao()
-    }
-
-    single {
-        get<AppDatabase>().boardWeightDao()
-    }
-
-    single {
-        get<AppDatabase>().dailyReviewDao()
-    }
-
-    single {
-        get<AppDatabase>().hotListDao()
     }
 
     single {
@@ -789,18 +762,8 @@ val dataSourceModule = module {
         )
     }
     single<ContinueCandidateSource>(named("continue.council")) { CouncilContinueSource(context = get(), conversationDao = get()) }
-    single<ContinueCandidateSource>(named("continue.deep_read")) {
-        DeepReadContinueSource(
-            hotListDao = get(),
-            context = get(),
-            observeActiveWorkStates = get<DeepReadScheduler>()::observeActiveWorkStates,
-        )
-    }
     single<ContinueCandidateSource>(named("continue.mini_app_draft")) { MiniAppDraftContinueSource(context = get(), draftDao = get()) }
     single<ContinueCandidateSource>(named("continue.mini_app_runner")) { MiniAppRunnerContinueSource(miniAppDao = get()) }
-    single<ContinueCandidateSource>(named("continue.novel_workspace")) {
-        NovelWorkspaceContinueSource(repository = get())
-    }
 
     single<ContinueDismissStore> {
         RoomContinueDismissStore(

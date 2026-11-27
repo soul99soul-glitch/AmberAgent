@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="cloud_detail_configuration">Cloud configuration</string>
+    <string name="cloud_detail_model_search">Models and search</string>
+    <string name="cloud_detail_rules">Habits and rules</string>
+    <string name="cloud_detail_tasks">Cloud tasks</string>
+    <string name="cloud_detail_submit">Send a task to the cloud</string>
+    <string name="cloud_detail_task_board">Task board</string>
+    <string name="cloud_detail_no_tasks">No tasks yet</string>
+    <string name="cloud_detail_model">Model</string>
+    <string name="cloud_detail_not_configured">Not configured</string>
+    <string name="cloud_detail_auth">Authentication</string>
+    <string name="cloud_detail_siwc">Sign in with ChatGPT</string>
+    <string name="cloud_detail_plan">Subscription plan</string>
+    <string name="cloud_detail_search_aggregate">Combined search</string>
+    <string name="cloud_detail_search_fallback">Fallback search</string>
+    <string name="cloud_detail_search">Search</string>
+    <string name="cloud_detail_key_configured">API key configured</string>
+    <string name="cloud_detail_no_rules">No rules yet</string>
+    <string name="cloud_detail_archive_rule">Archive rule</string>
+    <string name="cloud_detail_revoke_rule">Revoke rule</string>
+    <string name="cloud_detail_task_prompt">What should Amber do?</string>
+    <string name="cloud_detail_submit_retry">Check the task board, or retry the same request.</string>
+    <string name="cloud_detail_send">Send</string>
+    <string name="cloud_detail_task">Cloud task</string>
+    <string name="cloud_detail_cancel_task">Cancel task</string>
+    <string name="cloud_detail_close">Close</string>
+    <string name="cloud_detail_access_denied">This pairing cannot access this feature.</string>
+    <string name="cloud_detail_stale">The pairing or request has changed. Refresh and try again.</string>
+    <string name="cloud_detail_unavailable">The paired cloud did not return this item or feature.</string>
+    <string name="cloud_detail_certificate">The cloud certificate no longer matches this pairing.</string>
+    <string name="cloud_detail_request_failed">The cloud request failed. Try again.</string>
+    <string name="cloud_detail_rule_proposed">Awaiting confirmation</string>
+    <string name="cloud_detail_rule_active">Active</string>
+    <string name="cloud_detail_rule_archived">Archived</string>
+    <string name="cloud_detail_rule_revoked">Revoked</string>
+    <string name="cloud_detail_unknown">Unknown</string>
+    <string name="cloud_detail_queued">Queued</string>
+    <string name="cloud_detail_running">Running</string>
+    <string name="cloud_detail_waiting">Waiting for you</string>
+    <string name="cloud_detail_idle">Idle</string>
+    <string name="cloud_detail_done">Completed</string>
+    <string name="cloud_detail_failed">Failed</string>
+    <string name="cloud_detail_cancelled">Cancelled</string>
+    <string name="cloud_detail_scheduled">Scheduled</string>
+    <string name="cloud_detail_ended">Ended</string>
+</resources>

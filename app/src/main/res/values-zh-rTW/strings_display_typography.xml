@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="setting_typography_group">字體</string>
+    <string name="setting_typography_weight">字重</string>
+    <string name="setting_typography_weight_system">跟隨系統</string>
+    <string name="setting_typography_weight_lighter">偏細</string>
+    <string name="setting_typography_weight_heavier">偏粗</string>
+    <string name="setting_typography_family_system">系統字體</string>
+    <string name="setting_typography_preview">**今日計畫 · Today**\n\n14:30 和 Amber 一起整理 3 則筆記。</string>
+    <string name="setting_display_reply_delivery_mode_title">回覆呈現方式</string>
+    <string name="setting_display_reply_delivery_live">即時串流</string>
+    <string name="setting_display_reply_delivery_segmented">分段呈現</string>
+    <string name="setting_display_agent_bubble_title">Agent 氣泡模式</string>
+    <string name="setting_display_agent_bubble_desc">以圓角氣泡卡片呈現 Agent 回覆</string>
+    <string name="setting_display_thinking_disabled_in_segmented_desc">分段呈現模式下思考過程預設收起，切換回串流呈現後可開啟。</string>
+    <string name="chat_inline_status_preparing_reply">正在整理回覆</string>
+</resources>

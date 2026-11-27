@@ -5,8 +5,6 @@ import android.net.Uri
 import androidx.navigation3.runtime.NavKey
 import app.amber.core.automation.display.VirtualDisplayRunRegistry
 import app.amber.core.automation.display.VirtualDisplayRunNotifier
-import app.amber.feature.board.hotlist.deepread.DeepReadNotifier
-import app.amber.feature.board.worker.BoardNotifier
 import app.amber.feature.macgateway.ProactiveNotificationPresenter
 import app.amber.feature.macgateway.ProactiveContract
 import app.amber.feature.macgateway.ProactiveDeepLinkInbox
@@ -66,39 +64,6 @@ internal fun phoneUseLiveScreenFromIntent(intent: Intent?): Screen.PhoneUseLive?
 
 internal fun openPersonalAgentFromIntent(intent: Intent?): Boolean =
     intent?.getBooleanExtra(EXTRA_OPEN_PERSONAL_AGENT, false) == true
-
-internal fun standaloneStartScreen(
-    intent: Intent,
-    surface: String = StandaloneSurfaces.current,
-    fallbackToHome: Boolean = true,
-): Screen? = when (surface) {
-    StandaloneSurfaces.NOVEL ->
-        app.amber.feature.novel.workspace.NovelWorkspaceNotificationRoute.screenFrom(intent)
-            ?: Screen.NovelProjects.takeIf { fallbackToHome }
-    StandaloneSurfaces.DEEP_READ ->
-        deepReadScreenFromIntent(intent) ?: Screen.TodayBoard.takeIf {
-            fallbackToHome || intent.getBooleanExtra(BoardNotifier.EXTRA_OPEN_TODAY_BOARD, false)
-        }
-    else -> null
-}
-
-internal fun deepReadScreenFromIntent(intent: Intent): Screen.DeepRead? {
-    if (!intent.getBooleanExtra(DeepReadNotifier.EXTRA_OPEN_DEEP_READ, false)) return null
-    val topicId = intent.getStringExtra(DeepReadNotifier.EXTRA_TOPIC_ID)
-        ?.takeIf { it.isNotBlank() }
-        ?: return null
-    val title = intent.getStringExtra(DeepReadNotifier.EXTRA_TITLE)
-        ?.takeIf { it.isNotBlank() }
-        ?: return null
-    val sourceUrl = intent.getStringExtra(DeepReadNotifier.EXTRA_SOURCE_URL)
-        ?.takeIf { it.isNotBlank() }
-    return Screen.DeepRead(
-        topicId = topicId,
-        title = title,
-        sourceUrl = sourceUrl,
-        fromHistory = intent.getBooleanExtra(DeepReadNotifier.EXTRA_FROM_HISTORY, true),
-    )
-}
 
 internal fun taskSessionScreenFromIntent(intent: Intent): Screen.Chat? {
     // Shortcut intents carry their own prompt extra and are consumed by

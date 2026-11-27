@@ -12,18 +12,6 @@ class SessionHomeRouteTest {
     @Test
     fun `continue routes preserve their task focus`() {
         assertEquals(
-            Screen.DeepRead(
-                topicId = "topic-1",
-                title = "Topic",
-                sourceUrl = "https://example.com/topic",
-            ),
-            ContinueRoute.DeepRead(
-                topicId = "topic-1",
-                title = "Topic",
-                sourceUrl = "https://example.com/topic",
-            ).toScreen(),
-        )
-        assertEquals(
             Screen.Chat(
                 id = "conversation-1",
                 messageId = "message-1",
@@ -51,18 +39,6 @@ class SessionHomeRouteTest {
             Screen.MiniAppRunner(appId = "mini-1"),
             ContinueRoute.MiniAppRunner(appId = "mini-1").toScreen(),
         )
-        assertEquals(
-            Screen.NovelMarkdown(
-                projectId = "project-1",
-                branchSlug = "branch-a",
-                jobId = "job-1",
-            ),
-            ContinueRoute.NovelWorkspace(
-                projectId = "project-1",
-                branchSlug = "branch-a",
-                jobId = "job-1",
-            ).toScreen(),
-        )
     }
 
     @Test
@@ -76,7 +52,7 @@ class SessionHomeRouteTest {
             ) { true },
         )
         assertTrue(
-            canOpenContinueRoute(ContinueRoute.DeepRead("topic", "Topic")) {
+            canOpenContinueRoute(ContinueRoute.MiniAppRunner("mini-1")) {
                 error("non-chat route must not query conversations")
             },
         )

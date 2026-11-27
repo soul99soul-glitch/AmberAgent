@@ -1,13 +1,16 @@
 package app.amber.feature.ui.theme
 
 import app.amber.core.settings.ThemeDesign
+import app.amber.core.settings.ChatFontFamily
 import app.amber.core.settings.DisplaySetting
+import app.amber.core.settings.TextWeight
 import app.amber.core.utils.JsonInstant
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -64,6 +67,32 @@ class ThemePackTransferTest {
             assertEquals(id, document.id)
             assertEquals(emptyList<String>(), ThemePackTransfer.validationIssues(document))
         }
+    }
+
+    @Test
+    fun `Arquiel presets retain their portable identity and preserve display preferences`() {
+        val ids = listOf(
+            "arquiel-warm-editorial", "arquiel-things-polish", "arquiel-comet-indigo",
+            "arquiel-takram-moss", "arquiel-bookcraft-cinnabar", "arquiel-linear-terminal",
+        )
+        assertEquals(ids, ThemePackTransfer.builtinPackIds.takeLast(ids.size))
+        assertTrue(ThemePackTransfer.builtinIds.containsAll(ids))
+        val display = DisplaySetting(textWeight = TextWeight.entries.last(), chatFontFamily = ChatFontFamily.entries.last())
+        ids.forEach { id ->
+            val recipe = requireNotNull(ThemePackTransfer.builtin(id))
+            val applied = ThemePackageApplier.applyTokens(ThemePackTransfer.asPackage(recipe), display)
+            assertEquals(display, applied.copy(accentColor = display.accentColor, themePack = null))
+            assertEquals(recipe, ThemePackTransfer.decode(ThemePackTransfer.encode(ThemePackTransfer.export(applied))))
+            assertNull(recipe.canvasScope)
+            assertNull(recipe.settingsChrome)
+        }
+        val cinnabar = requireNotNull(ThemePackTransfer.builtin("arquiel-bookcraft-cinnabar"))
+        assertEquals("serif", cinnabar.chromeTypeface)
+        assertEquals("#F6F1E7", cinnabar.design?.light?.background)
+        assertEquals("#151210", cinnabar.design?.dark?.background)
+        val linear = requireNotNull(ThemePackTransfer.builtin("arquiel-linear-terminal")).design
+        assertEquals("#0C0D10", linear?.light?.background)
+        assertEquals(linear?.light, linear?.dark)
     }
 
     @Test

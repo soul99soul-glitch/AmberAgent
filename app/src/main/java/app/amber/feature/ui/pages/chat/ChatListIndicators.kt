@@ -1,5 +1,8 @@
 package app.amber.feature.ui.pages.chat
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -7,6 +10,11 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,8 +23,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
@@ -32,11 +42,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import kotlin.math.PI
+import kotlin.math.sin
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.PackageOpen
 import app.amber.agent.R
@@ -44,6 +62,8 @@ import app.amber.core.context.CompactLifecycleState
 import app.amber.core.context.CompactSummaryPayloads
 import app.amber.core.context.ConversationCompact
 import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.theme.LocalAmberTokens
+import app.amber.feature.ui.theme.LocalAmberType
 
 @Composable
 internal fun TimelineCompactMarkers(
@@ -187,13 +207,135 @@ private fun AgentWaitingDot(
     }
 }
 
-@Suppress("UNUSED_PARAMETER")
+/**
+ * Exact Android counterpart of iOS `ChatTaskProgressDot`:
+ * 3 staggered varying-shade accent dots doing a smooth vertical sine wave loop.
+ */
+@Composable
+internal fun ChatTaskWaveDots(
+    tint: Color = LocalAmberTokens.current.accent,
+    modifier: Modifier = Modifier,
+) {
+    val transition = rememberInfiniteTransition(label = "chat_task_wave_dots")
+    val phase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = (2.0 * PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1366, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "wave_phase",
+    )
+    val density = LocalDensity.current
+    val maxLiftPx = with(density) { 2.3.dp.toPx() }
+    val tiers = floatArrayOf(1.0f, 0.72f, 0.46f)
+    Row(
+        modifier = modifier
+            .width(23.dp)
+            .height(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.5.dp, Alignment.CenterHorizontally),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        for (dotIndex in 0 until 3) {
+            val wave = sin((phase - dotIndex * 0.92f).toDouble()).toFloat()
+            val normalized = (wave + 1f) * 0.5f
+            val dotAlpha = ((0.38f + 0.62f * normalized) * tiers[dotIndex]).coerceIn(0.28f, 1f)
+            val dotScale = 0.90f + 0.16f * normalized
+            Box(
+                modifier = Modifier
+                    .size(5.2.dp)
+                    .graphicsLayer {
+                        translationY = -maxLiftPx * wave
+                        scaleX = dotScale
+                        scaleY = dotScale
+                        alpha = dotAlpha
+                    }
+                    .clip(CircleShape)
+                    .drawBehind { drawRect(tint) },
+            )
+        }
+    }
+}
+
 @Composable
 internal fun AgentWorkingIndicator(
     processingStatus: String?,
     modifier: Modifier = Modifier,
 ) {
-    AgentWaitingDot(modifier = modifier.size(28.dp))
+    val isPersonalAgent = LocalChatStageMode.current is ChatStageMode.PersonalAgent
+    if (!isPersonalAgent) {
+        AgentWaitingDot(modifier = modifier.size(28.dp))
+        return
+    }
+    val statusText = processingStatus?.trim()?.takeIf { it.isNotEmpty() }
+        ?: stringResource(R.string.chat_inline_status_preparing_reply)
+    val tokens = LocalAmberTokens.current
+    val amberType = LocalAmberType.current
+    val shimmerTransition = rememberInfiniteTransition(label = "inline_status_shimmer")
+    val shimmerProgress by shimmerTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1800, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "shimmer_progress",
+    )
+    val density = LocalDensity.current
+    val sweepSpanPx = with(density) { 240.dp.toPx() }
+    val bandWidthPx = with(density) { 88.dp.toPx() }
+    val baseInk = tokens.ink2.copy(alpha = 0.88f)
+    val highlightInk = if (tokens.isDark) {
+        lerp(tokens.ink, Color.White, 0.35f)
+    } else {
+        lerp(tokens.ink2, tokens.accent, 0.45f)
+    }
+    val startX = -bandWidthPx + (sweepSpanPx + bandWidthPx * 2f) * shimmerProgress
+    val textBrush = Brush.linearGradient(
+        colorStops = arrayOf(
+            0.0f to baseInk,
+            0.38f to baseInk,
+            0.50f to highlightInk,
+            0.62f to baseInk,
+            1.0f to baseInk,
+        ),
+        start = Offset(startX, 0f),
+        end = Offset(startX + bandWidthPx, 0f),
+    )
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 30.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        ChatTaskWaveDots(tint = tokens.accent)
+        AnimatedContent(
+            targetState = statusText,
+            modifier = Modifier.weight(1f),
+            transitionSpec = {
+                val enter = fadeIn(tween(180, easing = FastOutSlowInEasing)) +
+                    slideInVertically(tween(200, easing = FastOutSlowInEasing)) { it / 3 }
+                val exit = fadeOut(tween(120, easing = FastOutSlowInEasing)) +
+                    slideOutVertically(tween(140, easing = FastOutSlowInEasing)) { -it / 3 }
+                (enter togetherWith exit).using(SizeTransform(clip = true))
+            },
+            label = "inline_working_status",
+        ) { line ->
+            Text(
+                text = line,
+                style = amberType.secondary.copy(
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp,
+                    fontWeight = FontWeight.Medium,
+                    brush = textBrush,
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
 }
 
 @Composable
@@ -202,15 +344,14 @@ internal fun TimelineTailWorkingIndicator(
     visible: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val isPersonalAgent = LocalChatStageMode.current is ChatStageMode.PersonalAgent
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(AgentWorkingIndicatorReserveHeight),
-        // Top-aligned: the dot hugs the streaming content above it — the old
-        // bottom alignment parked ~28dp of blank between content and dot on
-        // top of the follow-animation padding. The remaining reserve below is
-        // the scroll-over buffer + end-of-generation anti-drop retention.
-        contentAlignment = Alignment.TopCenter,
+        // Top-aligned: the dot/status line hugs the streaming content above it.
+        // Personal Agent left-aligns the indicator with the assistant reading column (iOS/HarmonyOS parity).
+        contentAlignment = if (isPersonalAgent) Alignment.TopStart else Alignment.TopCenter,
     ) {
         // Crossfade instead of popping: below 0.01 alpha the dot leaves
         // composition entirely so the retained (visible=false) reserve doesn't

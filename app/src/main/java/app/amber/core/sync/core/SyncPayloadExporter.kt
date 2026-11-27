@@ -12,7 +12,6 @@ import app.amber.core.sync.core.SyncArchiveCodec.Companion.SETTINGS_ENTRY
 import app.amber.core.sync.core.SyncArchiveManager.Companion.NOVEL_WORKSPACE_DATASET
 import app.amber.core.sync.core.SyncArchiveManager.Companion.NOVEL_WORKSPACE_ROOT
 import app.amber.core.sync.core.SyncArchiveManager.Companion.SYNC_FILE_ROOTS
-import app.amber.feature.novelworkspace.NovelWorkspaceRestoreBoundary
 import app.amber.feature.workspace.WorkspaceManager
 import java.io.File
 import java.io.FileOutputStream
@@ -34,6 +33,7 @@ internal class SyncPayloadExporter(
     private val secretRedactor: SecretRedactor,
     private val codec: SyncArchiveCodec,
     private val workspaceManager: WorkspaceManager?,
+    private val restoreWriteGate: SyncRestoreWriteGate?,
 ) {
     private val redactor = SyncRedactor(json)
 
@@ -171,7 +171,7 @@ internal class SyncPayloadExporter(
         return SyncDatasetSummary(ArtifactBackupContentStore.DATASET, count, bytes)
     }
 
-    private fun writeFileTrees(zip: ZipOutputStream, mode: SyncMode): SyncDatasetSummary {
+    private suspend fun writeFileTrees(zip: ZipOutputStream, mode: SyncMode): SyncDatasetSummary {
         var count = 0
         var bytes = 0L
         SYNC_FILE_ROOTS.forEach { relativeRoot ->
@@ -191,11 +191,14 @@ internal class SyncPayloadExporter(
             val snapshot = createNovelSnapshotDirectory()
             val snapshotTree = File(snapshot, "workspace")
             try {
-                // Copy under the same short owner lock as novel transactions. Compression,
-                // encryption and provider uploads happen after releasing that lock.
-                NovelWorkspaceRestoreBoundary.write {
-                    val root = File(context.filesDir, NOVEL_WORKSPACE_ROOT)
+                // The retired workspace can still change during archive restore.
+                val root = File(context.filesDir, NOVEL_WORKSPACE_ROOT)
+                if (restoreWriteGate == null) {
                     if (root.exists()) root.copyRecursively(snapshotTree, overwrite = true)
+                } else {
+                    restoreWriteGate.withCurrentWriterOrCancel {
+                        if (root.exists()) root.copyRecursively(snapshotTree, overwrite = true)
+                    }
                 }
                 snapshotTree.walkTopDown().filter { it.isFile }.forEach { file ->
                     val relativePath = file.relativeTo(snapshotTree).invariantSeparatorsPath

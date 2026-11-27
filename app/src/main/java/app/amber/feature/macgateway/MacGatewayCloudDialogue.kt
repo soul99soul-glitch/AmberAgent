@@ -485,7 +485,8 @@ class CloudDialogueCoordinator(
         publishLocked()
     }
 
-    suspend fun selectFollowupTarget(workItemId: String?) = mutex.withLock {
+    suspend fun selectFollowupTarget(workItemId: String?, expectedConnectionGeneration: Long? = null) = mutex.withLock {
+        if (expectedConnectionGeneration != null && restoredGeneration != expectedConnectionGeneration) return@withLock
         selectedFollowupWorkItemId = workItemId?.takeIf { id ->
             tasksById[id]?.active == true
         }
@@ -655,13 +656,17 @@ class CloudDialogueCoordinator(
     suspend fun stopWorkItem(
         workItemId: String,
         requestId: String,
+        expectedConnectionGeneration: Long? = null,
     ): CloudDialogueSubmission {
-        val generation = mutex.withLock { capturePollGenerationLocked() }
+        val generation = mutex.withLock { captureSendGenerationLocked(expectedConnectionGeneration) }
         val client = clientProvider() ?: throw MacGatewayException.Unreachable()
         val now = System.currentTimeMillis()
         val (initialSubmission, initialPending) = mutex.withLock {
             requireCurrentSession(generation)
             val task = tasksById[workItemId]
+            if (expectedConnectionGeneration != null && task == null) {
+                throw MacGatewayException.Conflict("gateway_task_changed")
+            }
             val targetConv = task?.conversationId ?: activeConversationId.orEmpty()
             val existing = submissionsByRequestId[requestId]
             val sub = (existing ?: CloudDialogueSubmission(
@@ -715,17 +720,22 @@ class CloudDialogueCoordinator(
     }
 
     // Only a task result settles the execution outcome. Input receipts acknowledge delivery.
-    suspend fun recheckOutcomeUnknownTask(workItemId: String): Boolean {
-        pollOnce(reportFailure = true)
-        return mutex.withLock { tasksById[workItemId]?.outcomeUnknown != true }
+    suspend fun recheckOutcomeUnknownTask(workItemId: String, expectedConnectionGeneration: Long? = null): Boolean {
+        pollOnce(reportFailure = true, expectedConnectionGeneration = expectedConnectionGeneration)
+        return mutex.withLock {
+            captureSendGenerationLocked(expectedConnectionGeneration)
+            tasksById[workItemId]?.outcomeUnknown != true
+        }
     }
 
     suspend fun retryOutcomeUnknownTask(
         conversationId: String,
         workItemId: String,
         requestId: String,
+        expectedConnectionGeneration: Long? = null,
     ): CloudDialogueSubmission {
         val (retryId, prompt, retryPending) = mutex.withLock {
+            captureSendGenerationLocked(expectedConnectionGeneration)
             val task = tasksById[workItemId]
             require(task != null && task.conversationId == conversationId &&
                 task.outcomeUnknown && !task.outcomeUnknownAbandoned) { "任务已不再等待结果确认" }
@@ -744,8 +754,9 @@ class CloudDialogueCoordinator(
             Triple(id, original.text, pending)
         }
         commitPersist(retryPending, immediate = true)
-        val submission = sendMessage(conversationId, prompt, retryId)
+        val submission = sendMessage(conversationId, prompt, retryId, expectedConnectionGeneration)
         val abandonPending = mutex.withLock {
+            captureSendGenerationLocked(expectedConnectionGeneration)
             val task = tasksById[workItemId]
             if (task?.outcomeUnknown == true && task.retryRequestId == retryId) {
                 abandonOutcomeUnknownTaskLocked(task)
@@ -757,8 +768,9 @@ class CloudDialogueCoordinator(
         return submission
     }
 
-    suspend fun abandonOutcomeUnknownTask(workItemId: String) {
+    suspend fun abandonOutcomeUnknownTask(workItemId: String, expectedConnectionGeneration: Long? = null) {
         val pending = mutex.withLock {
+            captureSendGenerationLocked(expectedConnectionGeneration)
             val existing = tasksById[workItemId] ?: return@withLock null
             if (existing.outcomeUnknown) abandonOutcomeUnknownTaskLocked(existing) else null
         }
@@ -778,9 +790,9 @@ class CloudDialogueCoordinator(
         return pending
     }
 
-    suspend fun pollOnce(reportFailure: Boolean = false) {
+    suspend fun pollOnce(reportFailure: Boolean = false, expectedConnectionGeneration: Long? = null) {
         val (currentCursor, boundConversationId, pollGen) = mutex.withLock {
-            Triple(cursor, activeConversationId, capturePollGenerationLocked())
+            Triple(cursor, activeConversationId, captureSendGenerationLocked(expectedConnectionGeneration))
         }
         val client = clientProvider() ?: if (reportFailure) throw MacGatewayException.Unreachable() else return
         if (!isGenerationCurrentFast(pollGen)) return

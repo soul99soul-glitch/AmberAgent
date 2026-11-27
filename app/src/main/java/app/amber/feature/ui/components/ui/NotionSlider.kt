@@ -59,6 +59,7 @@ fun NotionSlider(
     valueLabel: (@Composable RowScope.(Float) -> Unit)? = null,
     enabled: Boolean = true,
     trackHeight: Dp = 3.dp,
+    onValueChange: (Float) -> Unit = {},
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isDragged by interactionSource.collectIsDraggedAsState()
@@ -73,7 +74,10 @@ fun NotionSlider(
     ) {
         Slider(
             value = live,
-            onValueChange = { live = it },
+            onValueChange = {
+                live = it
+                onValueChange(it)
+            },
             onValueChangeFinished = {
                 val snapped = if (snapStep != null) {
                     // Round to the nearest multiple of snapStep. Single formula handles
@@ -89,6 +93,7 @@ fun NotionSlider(
                     live
                 }
                 live = snapped
+                onValueChange(snapped)
                 if (snapped != value) onValueChangeFinished(snapped)
             },
             valueRange = valueRange,

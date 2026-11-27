@@ -131,18 +131,19 @@ fun SettingAgentExtensionsPage() {
 @Composable
 fun SettingAgentRuntimeTasksPage(
     taskScheduler: AgentTaskScheduler = koinInject(),
-    vm: SettingVM = koinViewModel(),
+    showHarnessSettings: Boolean = true,
 ) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val tasks by taskScheduler.tasksFlow.collectAsStateWithLifecycle()
-    val settings by vm.settings.collectAsStateWithLifecycle()
-    val debug = settings.agentRuntime.harnessDebug
-    val speculative = settings.agentRuntime.speculativeToolExecution
+    val title = stringResource(
+        if (showHarnessSettings) R.string.setting_agent_runtime_tasks_page_title
+        else R.string.personal_agent_tab_tasks,
+    )
 
     Scaffold(
         topBar = {
             WorkspaceTopBar(
-                title = stringResource(R.string.setting_agent_runtime_tasks_page_title),
+                title = title,
                 navigationIcon = { BackButton() },
                 scrollBehavior = scrollBehavior,
             )
@@ -152,94 +153,120 @@ fun SettingAgentRuntimeTasksPage(
             .amberCanvas(),
         containerColor = androidx.compose.ui.graphics.Color.Transparent,
     ) { innerPadding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
+        AgentRuntimeTasksListBody(
+            tasks = tasks,
+            showHarnessSettings = showHarnessSettings,
             contentPadding = innerPadding + PaddingValues(horizontal = SettingPageHorizontalInset, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            item {
-                SettingCardGroup(
-                    title = stringResource(R.string.setting_agent_runtime_tasks_page_title),
-                ) {
-                    item(
-                        headlineContent = { Text(stringResource(R.string.setting_agent_runtime_tasks_scope_title)) },
-                        supportingContent = { Text(stringResource(R.string.setting_agent_runtime_tasks_scope_desc)) },
-                    )
-                    item(
-                        headlineContent = { Text(stringResource(R.string.setting_agent_runtime_debug_permission_title)) },
-                        supportingContent = { Text(stringResource(R.string.setting_agent_runtime_debug_permission_desc)) },
-                        trailingContent = {
-                            Switch(
-                                checked = debug.showPermissionReasons,
-                                onCheckedChange = { checked ->
-                                    vm.updateSettings { current ->
-                                        current.copy(
-                                            agentRuntime = current.agentRuntime.copy(
-                                                harnessDebug = current.agentRuntime.harnessDebug.copy(showPermissionReasons = checked)
-                                            )
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+@Composable
+internal fun AgentRuntimeTasksListBody(
+    tasks: List<AgentTaskSnapshot>,
+    showHarnessSettings: Boolean,
+    contentPadding: PaddingValues,
+    modifier: Modifier = Modifier,
+    leadingItems: (androidx.compose.foundation.lazy.LazyListScope.() -> Unit)? = null,
+    showEmptyStateWhenNoTasks: Boolean = true,
+) {
+    LazyColumn(
+        modifier = modifier,
+        contentPadding = contentPadding,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        if (leadingItems != null) {
+            leadingItems()
+        }
+        if (showHarnessSettings) item {
+            val vm: SettingVM = koinViewModel()
+            val settings by vm.settings.collectAsStateWithLifecycle()
+            val debug = settings.agentRuntime.harnessDebug
+            val speculative = settings.agentRuntime.speculativeToolExecution
+            SettingCardGroup(
+                title = stringResource(R.string.setting_agent_runtime_tasks_page_title),
+            ) {
+                item(
+                    headlineContent = { Text(stringResource(R.string.setting_agent_runtime_tasks_scope_title)) },
+                    supportingContent = { Text(stringResource(R.string.setting_agent_runtime_tasks_scope_desc)) },
+                )
+                item(
+                    headlineContent = { Text(stringResource(R.string.setting_agent_runtime_debug_permission_title)) },
+                    supportingContent = { Text(stringResource(R.string.setting_agent_runtime_debug_permission_desc)) },
+                    trailingContent = {
+                        Switch(
+                            checked = debug.showPermissionReasons,
+                            onCheckedChange = { checked ->
+                                vm.updateSettings { current ->
+                                    current.copy(
+                                        agentRuntime = current.agentRuntime.copy(
+                                            harnessDebug = current.agentRuntime.harnessDebug.copy(showPermissionReasons = checked)
                                         )
-                                    }
-                                },
-                            )
-                        },
-                    )
-                    item(
-                        headlineContent = { Text(stringResource(R.string.setting_agent_runtime_debug_parallel_title)) },
-                        supportingContent = { Text(stringResource(R.string.setting_agent_runtime_debug_parallel_desc)) },
-                        trailingContent = {
-                            Switch(
-                                checked = debug.showParallelBatches,
-                                onCheckedChange = { checked ->
-                                    vm.updateSettings { current ->
-                                        current.copy(
-                                            agentRuntime = current.agentRuntime.copy(
-                                                harnessDebug = current.agentRuntime.harnessDebug.copy(showParallelBatches = checked)
-                                            )
+                                    )
+                                }
+                            },
+                        )
+                    },
+                )
+                item(
+                    headlineContent = { Text(stringResource(R.string.setting_agent_runtime_debug_parallel_title)) },
+                    supportingContent = { Text(stringResource(R.string.setting_agent_runtime_debug_parallel_desc)) },
+                    trailingContent = {
+                        Switch(
+                            checked = debug.showParallelBatches,
+                            onCheckedChange = { checked ->
+                                vm.updateSettings { current ->
+                                    current.copy(
+                                        agentRuntime = current.agentRuntime.copy(
+                                            harnessDebug = current.agentRuntime.harnessDebug.copy(showParallelBatches = checked)
                                         )
-                                    }
-                                },
-                            )
-                        },
-                    )
-                    item(
-                        headlineContent = { Text(stringResource(R.string.setting_agent_runtime_debug_snapshot_title)) },
-                        supportingContent = { Text(stringResource(R.string.setting_agent_runtime_debug_snapshot_desc)) },
-                        trailingContent = {
-                            Switch(
-                                checked = debug.showCapabilitySnapshotSummary,
-                                onCheckedChange = { checked ->
-                                    vm.updateSettings { current ->
-                                        current.copy(
-                                            agentRuntime = current.agentRuntime.copy(
-                                                harnessDebug = current.agentRuntime.harnessDebug.copy(showCapabilitySnapshotSummary = checked)
-                                            )
+                                    )
+                                }
+                            },
+                        )
+                    },
+                )
+                item(
+                    headlineContent = { Text(stringResource(R.string.setting_agent_runtime_debug_snapshot_title)) },
+                    supportingContent = { Text(stringResource(R.string.setting_agent_runtime_debug_snapshot_desc)) },
+                    trailingContent = {
+                        Switch(
+                            checked = debug.showCapabilitySnapshotSummary,
+                            onCheckedChange = { checked ->
+                                vm.updateSettings { current ->
+                                    current.copy(
+                                        agentRuntime = current.agentRuntime.copy(
+                                            harnessDebug = current.agentRuntime.harnessDebug.copy(showCapabilitySnapshotSummary = checked)
                                         )
-                                    }
-                                },
-                            )
-                        },
-                    )
-                    item(
-                        headlineContent = { Text(stringResource(R.string.setting_agent_runtime_speculative_title)) },
-                        supportingContent = { Text(stringResource(R.string.setting_agent_runtime_speculative_desc)) },
-                        trailingContent = {
-                            Switch(
-                                checked = speculative.enabled,
-                                onCheckedChange = { checked ->
-                                    vm.updateSettings { current ->
-                                        current.copy(
-                                            agentRuntime = current.agentRuntime.copy(
-                                                speculativeToolExecution = current.agentRuntime.speculativeToolExecution.copy(enabled = checked)
-                                            )
+                                    )
+                                }
+                            },
+                        )
+                    },
+                )
+                item(
+                    headlineContent = { Text(stringResource(R.string.setting_agent_runtime_speculative_title)) },
+                    supportingContent = { Text(stringResource(R.string.setting_agent_runtime_speculative_desc)) },
+                    trailingContent = {
+                        Switch(
+                            checked = speculative.enabled,
+                            onCheckedChange = { checked ->
+                                vm.updateSettings { current ->
+                                    current.copy(
+                                        agentRuntime = current.agentRuntime.copy(
+                                            speculativeToolExecution = current.agentRuntime.speculativeToolExecution.copy(enabled = checked)
                                         )
-                                    }
-                                },
-                            )
-                        },
-                    )
-                }
+                                    )
+                                }
+                            },
+                        )
+                    },
+                )
             }
-            if (tasks.isEmpty()) {
+        }
+        if (tasks.isEmpty()) {
+            if (showEmptyStateWhenNoTasks) {
                 item {
                     CardGroup {
                         item(
@@ -249,15 +276,15 @@ fun SettingAgentRuntimeTasksPage(
                         )
                     }
                 }
-            } else {
-                items(tasks, key = { it.taskId }) { task ->
-                    CardGroup {
-                        item(
-                            leadingContent = { SettingTileIcon(Lucide.AlarmClock) },
-                            headlineContent = { Text(task.title) },
-                            supportingContent = { AgentTaskSummary(task) },
-                        )
-                    }
+            }
+        } else {
+            items(tasks, key = { it.taskId }) { task ->
+                CardGroup {
+                    item(
+                        leadingContent = { SettingTileIcon(Lucide.AlarmClock) },
+                        headlineContent = { Text(task.title) },
+                        supportingContent = { AgentTaskSummary(task) },
+                    )
                 }
             }
         }

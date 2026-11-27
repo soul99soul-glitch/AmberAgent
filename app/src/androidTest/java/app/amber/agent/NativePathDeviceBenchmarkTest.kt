@@ -8,7 +8,6 @@ import app.amber.agent.data.model.nativebridge.RegexTransformerNative
 import app.amber.agent.ui.components.richtext.nativebridge.MarkdownParserNative
 import app.amber.core.sync.core.SyncCrypto
 import app.amber.core.sync.core.SyncCryptoNative
-import app.amber.feature.deepread.nativebridge.ReaderExtractorNative
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.html.HtmlGenerator
 import org.intellij.markdown.parser.MarkdownParser
@@ -31,7 +30,6 @@ class NativePathDeviceBenchmarkTest {
 
     @After
     fun resetNativeConfigs() {
-        ReaderExtractorNative.config = ReaderExtractorNative.DisabledConfig
         SyncCryptoNative.config = SyncCryptoNative.DisabledConfig
     }
 
@@ -42,7 +40,6 @@ class NativePathDeviceBenchmarkTest {
             Build.SUPPORTED_ABIS.any { it == "arm64-v8a" },
         )
 
-        ReaderExtractorNative.config = EnabledReaderExtractorConfig
         SyncCryptoNative.config = EnabledSyncCryptoConfig
 
         val markdownNative = measure("markdown_html_native", iterations = 80) {
@@ -79,12 +76,6 @@ class NativePathDeviceBenchmarkTest {
         }
         assertEquals(syncJvmCrypto.sha256(syncBytes), syncNativeCrypto.sha256(syncBytes))
 
-        val readerNative = measure("reader_extractor_native", iterations = 80) {
-            ReaderExtractorNative.extractOrNull(readerHtml, "https://example.com/article")
-                ?: error("reader native unavailable")
-        }
-        assertNotNull(ReaderExtractorNative.extractOrNull(readerHtml, "https://example.com/article"))
-
         listOf(
             markdownNative,
             markdownJvm,
@@ -92,7 +83,6 @@ class NativePathDeviceBenchmarkTest {
             regexJvm,
             syncNative,
             syncJvm,
-            readerNative,
         ).forEach { result ->
             Log.i(TAG, result.toLogLine())
             println("${TAG}: ${result.toLogLine()}")
@@ -135,16 +125,6 @@ class NativePathDeviceBenchmarkTest {
                 "avgUs=${"%.3f".format(avgUs)} checksum=$checksum"
     }
 
-    private object EnabledReaderExtractorConfig : ReaderExtractorNative.Config {
-        override fun enabled(): Boolean = true
-        override fun onLoadFailure(error: Throwable) {
-            throw AssertionError("reader-extractor failed to load", error)
-        }
-        override fun onNativePanic(stage: String, error: Throwable?) {
-            throw AssertionError("reader-extractor native failure at $stage", error)
-        }
-    }
-
     private object EnabledSyncCryptoConfig : SyncCryptoNative.Config {
         override fun enabled(): Boolean = true
         override fun onLoadFailure(error: Throwable) {
@@ -183,15 +163,5 @@ class NativePathDeviceBenchmarkTest {
 
         private val syncBytes = ByteArray(256 * 1024) { index -> (index * 31).toByte() }
 
-        private val readerHtml = """
-            <html><head><title>Native path article</title></head><body>
-            <article>
-              <h1>Native path article</h1>
-              <p>This is a long article paragraph intended to exercise readability extraction on device.</p>
-              <p>It includes enough text for the extractor to keep the section and produce readable content.</p>
-              <p>中文段落也会保留，用来确认 UTF-8 内容在 JNI 往返时不被破坏。</p>
-            </article>
-            </body></html>
-        """.trimIndent()
     }
 }

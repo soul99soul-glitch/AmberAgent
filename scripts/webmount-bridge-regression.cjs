@@ -18,12 +18,7 @@ function createHarness(url = 'https://fixture.test/page') {
       <input id="readonly" readonly value="fixed">
       <button id="submit">Submit</button>
     </form>
-    <section id="zcodeTask" data-testid="v4-session-pane-task-a" data-session-id="remote-task-a">
-      <form id="zcodeComposer" class="chat-composer-region" data-testid="v4-composer" data-input-routing="startNow">
-        <div id="zcodeInput" data-testid="v4-composer-input" data-lexical-editor="true" role="textbox" contenteditable="true" aria-label="ZCode prompt"><p><br></p></div>
-        <button id="zcodeSend" data-testid="v4-composer-send" type="submit">Send</button>
-      </form>
-    </section>
+    <div id="controlledEditable" contenteditable="true"><p>seed</p></div>
     <div id="plainEditable" contenteditable="true"><p>seed</p></div>
     <div id="wrapper"><button id="login">Login</button></div>
     <button id="disabled" disabled>Disabled</button>
@@ -59,10 +54,7 @@ function createHarness(url = 'https://fixture.test/page') {
     readonly: 170,
     submit: 200,
     login: 250,
-    zcodeTask: 350,
-    zcodeComposer: 350,
-    zcodeInput: 360,
-    zcodeSend: 390,
+    controlledEditable: 360,
     disabled: 290,
     ariaDisabled: 320,
     bottom: 500,
@@ -84,23 +76,15 @@ function createHarness(url = 'https://fixture.test/page') {
   };
   window.getComputedStyle = () => ({ visibility: 'visible', display: 'block', opacity: '1' });
 
-  // Small browser editing shim for the Lexical fixture. It models the public
-  // contenteditable contract: a native edit emits beforeinput, the editor may
-  // consume it, and an unconsumed edit emits input after the DOM mutation.
-  const zcodeInput = document.getElementById('zcodeInput');
-  const editingEvents = [];
-  const replaceEditableText = (text) => {
-    zcodeInput.replaceChildren(document.createElement('p'));
-    zcodeInput.firstElementChild.textContent = text;
-  };
-  zcodeInput.addEventListener('beforeinput', event => {
-    editingEvents.push({ type: 'beforeinput', inputType: event.inputType, data: event.data });
+  const controlledEditable = document.getElementById('controlledEditable');
+  const controlledEditingEvents = [];
+  controlledEditable.addEventListener('beforeinput', event => {
+    controlledEditingEvents.push({ type: 'beforeinput', data: event.data });
     event.preventDefault();
-    if (event.inputType === 'insertText') replaceEditableText(event.data || '');
-    if (event.inputType === 'deleteContentBackward') replaceEditableText('');
+    controlledEditable.firstElementChild.textContent = event.data;
   });
-  zcodeInput.addEventListener('input', event => {
-    editingEvents.push({ type: 'input', inputType: event.inputType, data: event.data });
+  controlledEditable.addEventListener('input', event => {
+    controlledEditingEvents.push({ type: 'input', data: event.data });
   });
   const plainEditable = document.getElementById('plainEditable');
   const plainEditingEvents = [];
@@ -149,7 +133,7 @@ function createHarness(url = 'https://fixture.test/page') {
     return results[id];
   }
 
-  return { window, document, results, call, editingEvents, plainEditingEvents, networkEvents, finishPreview: text => resolvePreview(text) };
+  return { window, document, results, call, controlledEditingEvents, plainEditingEvents, networkEvents, finishPreview: text => resolvePreview(text) };
 }
 
 function waitForResult(results, id, timeoutMs = 1000) {
@@ -171,7 +155,7 @@ function waitForResult(results, id, timeoutMs = 1000) {
 }
 
 async function main() {
-  const { window, document, results, call, editingEvents, plainEditingEvents, networkEvents, finishPreview } = createHarness();
+  const { window, document, results, call, controlledEditingEvents, plainEditingEvents, networkEvents, finishPreview } = createHarness();
   // A missing listed source must fail assembly, never inject a partial bridge.
   assert.throws(() => loadBootstrap(name => {
     if (name === 'bootstrap-sources.json') return '["missing.js"]';
@@ -200,7 +184,6 @@ async function main() {
 
   assert.equal(window.createWebMountNetwork, undefined, 'network factory stays private to bootstrap');
   assert.equal(window.createFeishuSnapshot, undefined, 'site factories stay private to bootstrap');
-  assert.equal(window.createZCodeProtocol, undefined, 'ticket owner has no new global API');
   const feishu = createHarness('https://tenant.feishu.cn/docx/fixture-token');
   const heading = feishu.document.createElement('h2');
   heading.setAttribute('data-block-id', 'heading-block');
@@ -218,13 +201,8 @@ async function main() {
   feishu.window.close();
   let loginClicks = 0;
   let disabledClicks = 0;
-  let zcodeSubmits = 0;
   document.getElementById('login').addEventListener('click', () => { loginClicks++; });
   document.getElementById('disabled').addEventListener('click', () => { disabledClicks++; });
-  document.getElementById('zcodeComposer').addEventListener('submit', event => {
-    event.preventDefault();
-    zcodeSubmits++;
-  });
 
   const selectorClick = call('click', { selector: 'text=Login' }, 'selector_click');
   assert.equal(selectorClick.ok, true);
@@ -238,74 +216,13 @@ async function main() {
   const loginNode = interactive.nodes.find(node => node.name === 'Login');
   assert.ok(bottomNode && loginNode);
 
-  const zcodeComposerElement = document.getElementById('zcodeComposer');
-  zcodeComposerElement.setAttribute('data-input-routing', 'enqueue');
-  const enqueueRead = call('zcode_read', { include_page_text: false }, 'zcode_read_enqueue');
-  assert.equal(enqueueRead.zcode.supported, true);
-  assert.equal(enqueueRead.zcode.input_routing, 'enqueue');
-  assert.equal(enqueueRead.zcode.send_target, null);
-  zcodeComposerElement.setAttribute('data-input-routing', 'startNow');
-  const zcodeRead = call('zcode_read', { include_page_text: false }, 'zcode_read');
-  assert.equal(zcodeRead.zcode.supported, true);
-  assert.equal(zcodeRead.zcode.input_routing, 'startNow');
-  assert.equal(zcodeRead.zcode.draft_chars, 0);
-  assert.equal(zcodeRead.zcode.remote_task_id, 'remote-task-a');
-  assert.ok(zcodeRead.zcode.composer_target.ref);
-  assert.ok(zcodeRead.zcode.send_target.ref);
-  assert.equal(zcodeRead.ui_tree.snapshot_id, zcodeRead.zcode.snapshot_id);
-  assert.equal(Object.prototype.hasOwnProperty.call(zcodeRead.observation, 'readable'), false);
-  assert.equal(Object.prototype.hasOwnProperty.call(zcodeRead.zcode.composer_target, 'text'), false);
-  const wrongRemoteTask = call('zcode_prepare', {
-    snapshot_id: zcodeRead.zcode.snapshot_id,
-    remote_task_id: 'remote-task-b',
-    input_target: zcodeRead.zcode.composer_target.ref,
-    send_target: zcodeRead.zcode.send_target.ref,
-    text: 'must not type',
-  }, 'zcode_prepare_wrong_task');
-  assert.equal(wrongRemoteTask.ok, false);
-  assert.equal(wrongRemoteTask.error.code, 'remote_task_mismatch');
-  assert.equal(document.getElementById('zcodeInput').textContent, '');
-  const zcodePrepare = call('zcode_prepare', {
-    snapshot_id: zcodeRead.zcode.snapshot_id,
-    remote_task_id: zcodeRead.zcode.remote_task_id,
-    input_target: zcodeRead.zcode.composer_target.ref,
-    send_target: zcodeRead.zcode.send_target.ref,
-    text: 'Ask ZCode',
-  }, 'zcode_prepare');
-  assert.equal(zcodePrepare.ok, true);
-  assert.equal(zcodePrepare.text_chars, 9);
-  assert.deepEqual(editingEvents, [{ type: 'beforeinput', inputType: 'insertText', data: 'Ask ZCode' }]);
-  assert.equal(document.getElementById('zcodeInput').textContent, 'Ask ZCode');
-  window.eval(bridgeSource); // A prepared single-use ticket survives harmless same-realm injection.
-  const zcodeSend = call('zcode_send', { ticket: zcodePrepare.ticket }, 'zcode_send');
-  assert.equal(zcodeSend.ok, true);
-  assert.equal(zcodeSend.dispatched, true);
-  assert.equal(zcodeSubmits, 1);
-  const reusedTicket = call('zcode_send', { ticket: zcodePrepare.ticket }, 'zcode_send_reused');
-  assert.equal(reusedTicket.ok, false);
-  assert.equal(reusedTicket.error.code, 'ticket_used');
-
-  // A session pane can reuse its DOM node for another remote task. The
-  // one-shot ticket must catch that identity change and retain the draft for
-  // inspection instead of clicking the new task's submit button.
-  const zcodeInputElement = document.getElementById('zcodeInput');
-  zcodeInputElement.replaceChildren(document.createElement('p'));
-  const zcodeReadAgain = call('zcode_read', {}, 'zcode_read_again');
-  const zcodePrepareAgain = call('zcode_prepare', {
-    snapshot_id: zcodeReadAgain.zcode.snapshot_id,
-    remote_task_id: zcodeReadAgain.zcode.remote_task_id,
-    input_target: zcodeReadAgain.zcode.composer_target.ref,
-    send_target: zcodeReadAgain.zcode.send_target.ref,
-    text: 'Task guarded',
-  }, 'zcode_prepare_again');
-  assert.equal(zcodePrepareAgain.ok, true);
-  document.getElementById('zcodeTask').setAttribute('data-session-id', 'remote-task-b');
-  const changedTaskSend = call('zcode_send', { ticket: zcodePrepareAgain.ticket }, 'zcode_send_changed_task');
-  assert.equal(changedTaskSend.ok, false);
-  assert.equal(changedTaskSend.error.code, 'ticket_stale');
-  assert.equal(changedTaskSend.draft_retained, true);
-  assert.equal(zcodeInputElement.textContent, 'Task guarded');
-  assert.equal(zcodeSubmits, 1);
+  // Editors can consume beforeinput and apply their own update.
+  const controlledType = call('type', {
+    selector: '#controlledEditable', text: 'updated', clear: true,
+  }, 'controlled_type');
+  assert.equal(controlledType.ok, true);
+  assert.equal(document.querySelector('#controlledEditable > p').textContent, 'updated');
+  assert.deepEqual(controlledEditingEvents, [{ type: 'beforeinput', data: 'updated' }]);
 
   // An ordinary contenteditable with no beforeinput consumer exercises the
   // bridge's real DOM Range fallback. Verify append, replace, and clear each

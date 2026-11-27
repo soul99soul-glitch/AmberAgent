@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="amber_multi_device_mac">Mac</string>
+    <string name="amber_multi_device_not_paired">未配對</string>
+    <string name="amber_multi_device_cloud_pair_hint">掃描 amberd 產生的配對 QR Code，或貼上配對連結。</string>
+    <string name="amber_multi_device_fingerprint_hint">請核對指紋與主機顯示的指紋一致。</string>
+    <string name="amber_multi_device_wrong_role">此配對連結屬於另一個分頁。</string>
+    <string name="amber_multi_device_already_paired">這台主機已在另一個分頁配對。</string>
+    <string name="amber_multi_device_pairing_changed">配對已變更，請在目前連線中重試。</string>
+    <string name="amber_multi_device_dialogue_section">對話主機</string>
+    <string name="amber_multi_device_dialogue_select">使用%1$s對話</string>
+    <string name="amber_multi_device_dialogue_hint">選取後，新訊息將傳送至此主機。</string>
+    <string name="amber_multi_device_dialogue_unavailable">此主機離線或暫不支援 Amber 對話。</string>
+    <string name="amber_multi_device_unpair_title">解除與%1$s的配對？</string>
+    <string name="amber_multi_device_unpair_message">解除本機與目前所選主機的配對。</string>
+    <string name="amber_multi_device_unpaired_offline">本機已解除配對，主機未確認移除。</string>
+    <string name="amber_multi_device_unreachable">無法連線至主機，請檢查網路與電源。</string>
+    <string name="amber_multi_device_certificate">主機憑證已變更。請解除配對，核對新指紋後重新連線。</string>
+    <string name="amber_multi_device_unauthorized">主機已撤銷本機的配對，請重新配對。</string>
+    <string name="amber_multi_device_camera_permission">需要相機權限才能掃描 QR Code。</string>
+    <string name="amber_multi_device_mac_dialogue">Mac 對話</string>
+    <string name="amber_multi_device_mac_running">正在 Mac 上執行…</string>
+</resources>

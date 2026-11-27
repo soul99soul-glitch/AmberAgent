@@ -11,7 +11,6 @@ import app.amber.core.agent.runtime.AgentRunId
 import app.amber.core.context.CompactLifecycleState
 import app.amber.core.context.ConversationContextEngine
 import app.amber.core.context.ConversationContextRepository
-import app.amber.core.event.AppEventBus
 import app.amber.core.files.FilesManager
 import app.amber.core.infra.AppScope
 import app.amber.core.model.Conversation
@@ -164,7 +163,7 @@ class ChatTitleRenameRaceTest : DurableRuntimeTestBase() {
         ReflectionFixture.set(service, "outcomeUnknownFlow", MutableStateFlow(emptyMap<String, List<OutcomeUnknownPrompt>>()))
         return ChatVM(
             id.toString(), context as Application, settings, repo, service,
-            ReflectionFixture.allocate<FirebaseAnalytics>(), AppEventBus(), files,
+            ReflectionFixture.allocate<FirebaseAnalytics>(), files,
             FavoriteRepository(database.favoriteDao()),
             ConversationContextRepository(database.conversationCompactDao(), database.conversationContextEventDao(), repo),
             ConversationDraftStore(database.conversationDraftDao(), database.conversationDao()),

@@ -1355,26 +1355,6 @@
     return { ok: true, matches: matches, total_returned: matches.length };
   }
 
-  // Keep all ZCode ticket state in one adapter instance behind the ready guard.
-  var zcode = createZCodeProtocol({
-    roleOf: roleOf,
-    rectOf: rectOf,
-    isVisible: isVisible,
-    nodePath: nodePath,
-    describeNode: describeNode,
-    rememberSnapshotNode: rememberSnapshotNode,
-    isContentEditableElement: isContentEditableElement,
-    editableText: editableText,
-    observePage: observePage,
-    startSnapshot: startSnapshot,
-    snapshotState: snapshotState,
-    resolveTarget: resolveTarget,
-    performType: performType,
-    isDisabled: isDisabled,
-    isReadOnly: isReadOnly,
-    performClick: performClick,
-  });
-
   function actionResult(fn) {
     try { return fn(); }
     catch (e) {
@@ -1454,15 +1434,6 @@
         case 'click':    AmberWM.resolve(reqId, safeJson(actionResult(function () { return performClick(args); }))); return;
         case 'tap':      AmberWM.resolve(reqId, safeJson(actionResult(function () { return performTap(args); }))); return;
         case 'type':     AmberWM.resolve(reqId, safeJson(actionResult(function () { return performType(args); }))); return;
-        case 'zcode_read':
-          AmberWM.resolve(reqId, safeJson(actionResult(function () { return zcode.read(args); })));
-          return;
-        case 'zcode_prepare':
-          AmberWM.resolve(reqId, safeJson(actionResult(function () { return zcode.prepare(args); })));
-          return;
-        case 'zcode_send':
-          AmberWM.resolve(reqId, safeJson(actionResult(function () { return zcode.send(args); })));
-          return;
         case 'get':      AmberWM.resolve(reqId, safeJson(actionResult(function () { return performGet(args); }))); return;
         case 'feishu_snapshot':
           AmberWM.resolve(reqId, safeJson(actionResult(function () { return feishuSnapshot(args); })));

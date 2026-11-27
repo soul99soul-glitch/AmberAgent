@@ -67,8 +67,8 @@ class CapabilityFlagsTest {
     @Test
     fun togglingOneCapabilityDoesNotAffectOthers() = runBlocking {
         val flags = CapabilityFlags(createStore())
-        flags.setEnabled(Capability.NovelPackageV2, true)
-        Capability.entries.filter { it != Capability.NovelPackageV2 }.forEach { capability ->
+        flags.setEnabled(Capability.WorkspaceArtifactsV2, true)
+        Capability.entries.filter { it != Capability.WorkspaceArtifactsV2 }.forEach { capability ->
             assertEquals(
                 "$capability must keep its default",
                 capability.defaultEnabled,

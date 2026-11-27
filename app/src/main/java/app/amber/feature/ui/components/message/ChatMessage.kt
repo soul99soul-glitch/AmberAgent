@@ -19,7 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.fastForEach
@@ -36,11 +36,13 @@ import app.amber.feature.ui.components.ui.ChainOfThought
 import app.amber.feature.ui.context.LocalChatFontScale
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.context.LocalSettings
-import app.amber.feature.ui.theme.JetbrainsMono
+import app.amber.feature.ui.theme.AmberSans
+import app.amber.feature.ui.theme.JetBrainsMonoFamily
 import app.amber.feature.ui.theme.NotoSerifSC
 import app.amber.feature.ui.utils.amberTraceMeasure
 import app.amber.core.utils.copyMessageToClipboard
 import app.amber.core.settings.ChatFontFamily
+import app.amber.core.settings.DisplaySetting
 import app.amber.core.utils.base64Encode
 
 internal fun List<UIMessagePart>.hasRenderableChatMessageContent(): Boolean {
@@ -248,19 +250,19 @@ internal fun Modifier.animateContentSizeIf(enabled: Boolean): Modifier =
     if (enabled) animateContentSize() else this
 
 @Composable
-internal fun rememberChatMessageTextStyle(): androidx.compose.ui.text.TextStyle {
-    val settings = LocalSettings.current.displaySetting
-    return LocalTextStyle.current.copy(
-        fontSize = 14.sp * settings.fontSizeRatio,
-        lineHeight = LocalTextStyle.current.lineHeight * settings.fontSizeRatio,
-        fontFamily = when (settings.chatFontFamily) {
-            ChatFontFamily.DEFAULT -> FontFamily.Default
-            // SERIF: project-bundled Noto Serif SC (covers SC + ASCII). On non-SC scripts
-            // it falls back to the platform serif chain.
-            ChatFontFamily.SERIF -> NotoSerifSC
-            // MONOSPACE: project-bundled JetBrains Mono covers ASCII; CJK glyphs fall back
-            // to the system Mono (Noto Sans Mono CJK if installed, otherwise the default).
-            ChatFontFamily.MONOSPACE -> JetbrainsMono
-        }
+internal fun rememberChatMessageTextStyle(): TextStyle =
+    chatMessageTextStyle(LocalTextStyle.current, LocalSettings.current.displaySetting)
+
+internal fun chatMessageTextStyle(base: TextStyle, display: DisplaySetting): TextStyle =
+    base.copy(
+        fontSize = 14.sp * display.fontSizeRatio,
+        lineHeight = base.lineHeight * display.fontSizeRatio,
+        fontFamily = display.chatFontFamily.composeFamily,
     )
-}
+
+internal val ChatFontFamily.composeFamily
+    get() = when (this) {
+        ChatFontFamily.DEFAULT -> AmberSans
+        ChatFontFamily.SERIF -> NotoSerifSC
+        ChatFontFamily.MONOSPACE -> JetBrainsMonoFamily
+    }

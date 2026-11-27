@@ -95,8 +95,6 @@ fun WebMountSessionPage(
     sessionId: String,
     reopen: Boolean = false,
     owner: WebMountSessionOwner = koinInject(),
-    /** ZCode opens an explicitly interactive page; other callers stay read-only. */
-    initialHumanControl: Boolean = false,
 ) {
     val navController = LocalNavController.current
     val t = LocalAmberTokens.current
@@ -115,7 +113,6 @@ fun WebMountSessionPage(
     var selectedPopupId by remember(sessionId) { mutableStateOf<String?>(null) }
     var popupMenuOpen by remember(sessionId) { mutableStateOf(false) }
     var reopenConsumed by remember(sessionId) { mutableStateOf(false) }
-    var initialHumanControlConsumed by remember(sessionId) { mutableStateOf(false) }
     var confirmCloseAgent by remember(sessionId) { mutableStateOf(false) }
     var isForeground by remember(lifecycleOwner, sessionId) {
         mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
@@ -197,22 +194,16 @@ fun WebMountSessionPage(
         }
     }
 
-    // Ordinary entry is a read-only watch. Reopen is an explicit action from
-    // the task card; ZCode opts into one initial HUMAN claim because opening
-    // its page is itself an explicit interactive action. A rejected claim is
-    // kept visible in the header and is never presented as a successful claim.
+    // Ordinary entry is a read-only watch. Reopen is an explicit task card action.
     LaunchedEffect(
         sessionId,
         reopen,
-        initialHumanControl,
         isForeground,
         metadata?.sessionId,
     ) {
         if (!isForeground || metadata == null) return@LaunchedEffect
         if (reopen && !reopenConsumed) {
             reopenConsumed = acquireHuman(forceReopen = true)
-        } else if (initialHumanControl && !initialHumanControlConsumed) {
-            initialHumanControlConsumed = acquireHuman(forceReopen = false)
         }
     }
 

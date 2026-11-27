@@ -36,17 +36,8 @@ import kotlinx.serialization.json.contentOrNull
  * - network (args carry the outbound URL): WorkspaceArtifactTools.kt
  *   (http_request, download_file), SearchTools.kt (scrape_web), WebViewTools.kt
  *   (webview_open, webview_open_link), WebMountNavigationTools.kt (wm_open),
- *   WebMountZCodeTools.kt (wm_zcode_open/read/ask), WebMountFetchTools.kt
- *   (wm_signed_fetch), WebMountSiteTools.kt (wm_site_add),
- *   ScreenAutomationTools.kt (screen_open_url), IntentAccessTools.kt
- *   (intent_open's optional `data_uri`), FeishuOfficeTools.kt (officepro_open's
- *   optional `url`), DeepReadOpenTool.kt (deep_read_open's optional
- *   `source_url`)
- * - shell: TerminalTools.kt (the whole `terminal_` namespace)
- * - system: capabilityForTool (the PermissionDecisionResolver mapping source)
- *
- * Path canonicalization is shared with narrow() via [ExecutionPaths] (P1-6) so
- * the two can never diverge again.
+ *   WebMountFetchTools.kt (wm_signed_fetch), WebMountSiteTools.kt (wm_site_add),
+ *   (intent_open's optional data_uri) and FeishuOfficeTools.kt (officepro_open's optional url).
  */
 internal object ExecutionPolicyGate {
 
@@ -180,10 +171,6 @@ internal object ExecutionPolicyGate {
         "icloud_read" to "the iCloud Drive Vault",
         "icloud_write" to "the iCloud Drive Vault",
         "icloud_search" to "the iCloud Drive Vault",
-        // NovelWorkspaceTools.kt — project-directory-relative paths in the
-        // novel workspace tree, not /workspace.
-        "novel_workspace_read" to "the novel workspace tree",
-        "novel_workspace_write" to "the novel workspace tree",
         // SkillsTools.kt — use_skill's optional `path` is relative to the
         // installed skill directory (SkillReadBoundary containment), not
         // /workspace.
@@ -224,20 +211,12 @@ internal object ExecutionPolicyGate {
         "wm_open" to UrlArg("url", required = true),
         "wm_signed_fetch" to UrlArg("url", required = true),
         "wm_site_add" to UrlArg("url", required = true),
-        // ZCode tools use a host-owned saved share URL. The model only sends
-        // the selected origin (never the credential-bearing query); open may
-        // omit it for a discovery-only result, while read/ask must identify
-        // the origin the caller inspected and approved.
-        "wm_zcode_open" to UrlArg("url", required = false),
-        "wm_zcode_read" to UrlArg("url", required = true),
-        "wm_zcode_ask" to UrlArg("url", required = true),
         // P1-4: outbound-URL tools that were missing from the domain table.
         // screen_open_url requires an http(s) URL (tool-enforced); the other
         // three accept absent arguments and/or non-web schemes.
         "screen_open_url" to UrlArg("url", required = true),
         "intent_open" to UrlArg("data_uri", required = false),
         "officepro_open" to UrlArg("url", required = false),
-        "deep_read_open" to UrlArg("source_url", required = false),
     )
 
     /**

@@ -41,7 +41,6 @@ enum class Capability(
      * false remains false across upgrades.
      */
     OpenAIResponsesResume("openai_responses_resume", defaultEnabled = true),
-    NovelPackageV2("novel_package_v2"),
     SyncProviderV2("sync_provider_v2", defaultEnabled = true),
     /**
      * P4-03 persistent JS cells (parity plan §10 P4-03, P3 priority): cell

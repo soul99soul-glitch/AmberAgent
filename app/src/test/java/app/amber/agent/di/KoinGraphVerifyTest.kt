@@ -3,7 +3,6 @@ package app.amber.agent.di
 import app.amber.core.di.agentInfraModule
 import app.amber.core.di.agentRuntimeModule
 import app.amber.core.di.appModule
-import app.amber.core.di.boardModule
 import app.amber.core.di.chatModule
 import app.amber.core.di.dataSourceModule
 import app.amber.core.di.generationModule
@@ -11,7 +10,6 @@ import app.amber.core.di.toolExecutionModule
 import app.amber.core.di.iCloudModule
 import app.amber.core.di.jevModule
 import app.amber.core.di.memoryModule
-import app.amber.core.di.novelModule
 import app.amber.core.di.repositoryModule
 import app.amber.core.di.viewModelModule
 import app.amber.core.di.webMountModule
@@ -47,12 +45,10 @@ class KoinGraphVerifyTest {
         appModule,
         chatModule,
         memoryModule,
-        novelModule,
         iCloudModule,
         webMountModule,
         agentRuntimeModule,
         agentInfraModule,
-        boardModule,
         workspaceModule,
         viewModelModule,
         dataSourceModule,
@@ -78,21 +74,13 @@ class KoinGraphVerifyTest {
         // 推断真实依赖，按定义逐个豁免其构造器参数。
         val injectedParams = injectedParameters(
             definition<app.amber.core.utils.EmojiData>(List::class),
+            // AppModule opens the receipt preferences directly from Context.
+            definition<app.amber.feature.macgateway.ProactiveDeliveryReceipts>(
+                android.content.SharedPreferences::class,
+            ),
             // FirebaseAnalytics.getInstance() 工厂构建，构造器是混淆内部类，与图无关
             definition<com.google.firebase.analytics.FirebaseAnalytics>(
                 com.google.android.gms.internal.measurement.zzez::class,
-            ),
-            // 仓库根目录 File 由各自工厂（defaultRoot(...)）算出传入，不经图解析
-            definition<app.amber.feature.novel.persistence.NovelFileProjectRepository>(
-                java.io.File::class,
-            ),
-            definition<app.amber.feature.novelworkspace.NovelWorkspaceProjectRepository>(
-                java.io.File::class,
-            ),
-            // NovelModule computes the restore root from androidContext().filesDir;
-            // only the restore gate is requested from the graph.
-            definition<app.amber.feature.novel.workspace.NovelWorkspaceRestoreBridge>(
-                java.io.File::class,
             ),
             // AgentInfraModule builds this from Context; verifier reflects its
             // File primary constructor even though Koin never resolves File.
@@ -136,18 +124,12 @@ class KoinGraphVerifyTest {
             definition<app.amber.core.conversation.exchange.ConversationExchangeFileHandler>(
                 android.content.ContentResolver::class,
             ),
-            // runtime 在工厂里构造（NovelWorkspaceRuntime(get())）后传入协调器
-            definition<app.amber.feature.novel.workspace.NovelWorkspaceGhostwriteCoordinator>(
-                app.amber.feature.novel.workspace.NovelWorkspaceRuntime::class,
-            ),
             // adapters 在工厂里用 listOf(get(), ...) 字面组装后传入
             definition<app.amber.feature.webmount.core.WebMountManager>(List::class),
             // settingsFlow 取自 get<SettingsAggregator>().settingsFlow 属性表达式
             definition<app.amber.feature.modelcouncil.CouncilRoomManager>(
                 kotlinx.coroutines.flow.StateFlow::class,
             ),
-            // collectors 在工厂里 listOf(get(), ...) 字面组装后传入
-            definition<app.amber.feature.board.aggregator.SignalAggregator>(List::class),
             // QuickJsCellEngine() 在工厂内直接构造后传入
             definition<app.amber.feature.jscell.JsCellRuntime>(
                 app.amber.feature.jscell.JsCellEngine::class,

@@ -12,6 +12,7 @@ import app.amber.core.settings.ThemePackDocument
 /** Route-local visual role used by the portable canvas and chrome settings. */
 internal enum class ThemePageChrome {
     Home,
+    ConversationHome,
     Shell,
     Content,
 }
@@ -27,6 +28,7 @@ internal fun themePageChromeMetadata(chrome: ThemePageChrome): Map<String, Strin
 internal fun themePageChromeFrom(metadata: Map<String, Any>): ThemePageChrome =
     when (metadata[THEME_PAGE_CHROME_METADATA_KEY]) {
         ThemePageChrome.Home.name -> ThemePageChrome.Home
+        ThemePageChrome.ConversationHome.name -> ThemePageChrome.ConversationHome
         ThemePageChrome.Shell.name -> ThemePageChrome.Shell
         else -> ThemePageChrome.Content
     }
@@ -38,7 +40,7 @@ internal fun allowsThemeCanvasOverlay(
 ): Boolean {
     themePack ?: return true
     return when (themePack.canvasScope ?: "homeOnly") {
-        "homeOnly" -> pageChrome == ThemePageChrome.Home
+        "homeOnly" -> pageChrome == ThemePageChrome.Home || pageChrome == ThemePageChrome.ConversationHome
         "shell" -> pageChrome != ThemePageChrome.Content
         "appWide" -> true
         else -> false
@@ -64,15 +66,16 @@ private fun ProvideThemePageChrome(
     val usesDocumentTypeface = when (pageChrome) {
         ThemePageChrome.Home -> themePack != null
         ThemePageChrome.Shell -> themePack?.settingsChrome == true
-        ThemePageChrome.Content -> false
+        ThemePageChrome.ConversationHome, ThemePageChrome.Content -> false
     }
     CompositionLocalProvider(LocalThemePageChrome provides pageChrome) {
         if (themePack == null || !usesDocumentTypeface) {
             content()
         } else {
             val typeface = themePack.chromeTypeface
-            CompositionLocalProvider(LocalAmberType provides themeAmberTextStyles(typeface)) {
-                MaterialTheme(typography = themeTypography(typeface), content = content)
+            val weightOffset = LocalLegacyTextWeightOffset.current
+            CompositionLocalProvider(LocalAmberType provides themeAmberTextStyles(typeface, weightOffset)) {
+                MaterialTheme(typography = themeTypography(typeface, weightOffset), content = content)
             }
         }
     }

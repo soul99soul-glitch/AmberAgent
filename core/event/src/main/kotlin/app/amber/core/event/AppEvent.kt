@@ -1,13 +1,6 @@
 package app.amber.core.event
 
 sealed class AppEvent {
-    data class OpenDeepRead(
-        val topicId: String,
-        val title: String,
-        val sourceUrl: String? = null,
-        val forceRegenerate: Boolean = false,
-    ) : AppEvent()
-
     /**
      * P6-02: the user confirmed an image edit in a [GeneratedImageCarousel].
      * [sourceImageUrl] is the local `file://` URL of the image to modify;

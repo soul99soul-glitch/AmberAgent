@@ -149,7 +149,7 @@ internal fun ChatShelfPanelHost(
                 value.orEmpty()
             }
         }
-        ChatShelfPanelContent(items = items, onOpen = onOpen)
+        ChatShelfPanelContent(items = items, onOpen = onOpen, onClose = onDismiss)
     }
 }
 

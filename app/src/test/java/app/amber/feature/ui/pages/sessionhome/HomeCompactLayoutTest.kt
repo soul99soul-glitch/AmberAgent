@@ -117,7 +117,7 @@ class HomeCompactLayoutTest {
                     opened = it
                     resumed++
                 },
-                onDeepRead = {}, onMiniApps = {}, onNovel = {}, onWebMount = {}, onCouncil = {},
+                onMiniApps = {}, onWebMount = {}, onCouncil = {},
             )
         }
         compose.onNodeWithText(article, useUnmergedTree = true).assertIsDisplayed()
@@ -145,7 +145,7 @@ class HomeCompactLayoutTest {
             HomeFeatureRail(
                 resumeCandidate = state.value,
                 onOpenResume = {},
-                onDeepRead = {}, onMiniApps = {}, onNovel = {}, onWebMount = {}, onCouncil = {},
+                onMiniApps = {}, onWebMount = {}, onCouncil = {},
             )
         }
         compose.mainClock.advanceTimeBy(32)
@@ -233,9 +233,9 @@ class HomeCompactLayoutTest {
         id: String = "home-layout-fixture",
         title: String = article,
     ) = ContinueCandidate(
-        sourceKind = ContinueSourceKind.DEEP_READ,
+        sourceKind = ContinueSourceKind.IMAGE_GENERATION,
         sourceId = id,
-        route = ContinueRoute.DeepRead(id, title, "https://example.com/article"),
+        route = ContinueRoute.ImageGeneration("conversation", toolCallId = id),
         title = title,
         summary = phase,
         lastUpdatedAt = Instant.EPOCH,

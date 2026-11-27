@@ -1,16 +1,9 @@
 package app.amber.agent
 
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.navigation3.ui.LocalNavAnimatedContentScope
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.togetherWith
 import androidx.core.net.toUri
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
-import androidx.navigation3.ui.NavDisplay
 import app.amber.feature.ui.pages.backup.BackupPage
 import app.amber.feature.ui.pages.chat.ChatPage
 import app.amber.feature.ui.pages.councilroom.CouncilRoomPage
@@ -30,15 +23,8 @@ import app.amber.feature.ui.pages.proactive.CloudProactiveCenterPage
 import app.amber.feature.ui.pages.sessionhome.SessionHomePage
 import app.amber.feature.ui.pages.profile.ProfilePage
 import app.amber.feature.ui.pages.live.LiveCompanionPage
-import app.amber.feature.ui.pages.synara.SynaraConnectPage
-import app.amber.feature.ui.pages.synara.SynaraConnection
-import app.amber.feature.ui.pages.synara.SynaraWorkspacePage
-import app.amber.feature.ui.pages.zcode.ZCodePage
-import app.amber.feature.ui.pages.zcode.ZCodeSessionPage
 import app.amber.feature.ui.pages.log.LogPage
 import app.amber.feature.ui.pages.miniapp.MiniAppListPage
-import app.amber.feature.ui.pages.novel.NovelMarkdownWorkspacePage
-import app.amber.feature.ui.pages.novel.NovelProjectsPage
 import app.amber.feature.ui.pages.miniapp.MiniAppRunnerPage
 import app.amber.feature.ui.pages.miniapp.MiniAppSettingsPage
 import app.amber.feature.ui.pages.search.SearchPage
@@ -63,11 +49,6 @@ import app.amber.feature.ui.pages.setting.SettingExperimentalModelCouncilPage
 import app.amber.feature.ui.pages.setting.SettingExperimentalPage
 import app.amber.feature.ui.pages.setting.SettingExperimentalSubAgentPage
 import app.amber.feature.ui.pages.setting.SettingExperimentalWebMountPage
-import app.amber.feature.ui.pages.board.TodayBoardPage
-import app.amber.feature.ui.pages.board.SettingTodayBoardPage
-import app.amber.feature.ui.pages.board.DeepReadScreen
-import app.amber.feature.ui.pages.board.DeepReadHistoryPage
-import app.amber.feature.ui.pages.board.DeepReadTemplateWorkbenchPage
 import app.amber.feature.ui.pages.setting.SettingFilesPage
 import app.amber.feature.ui.pages.setting.SettingChatStoragePage
 import app.amber.feature.ui.pages.setting.SettingStoragePage
@@ -128,7 +109,7 @@ internal fun appNavigationEntries(): (NavKey) -> NavEntry<NavKey> = entryProvide
         HistoryPage()
     }
 
-    entry<Screen.PersonalAgent> {
+    entry<Screen.PersonalAgent>(metadata = themePageChromeMetadata(ThemePageChrome.ConversationHome)) {
         PersonalAgentPage(
             enterTransition = LocalNavAnimatedContentScope.current.transition,
         )
@@ -150,29 +131,6 @@ internal fun appNavigationEntries(): (NavKey) -> NavEntry<NavKey> = entryProvide
 
     entry<Screen.LiveCompanion> {
         LiveCompanionPage()
-    }
-
-    entry<Screen.SynaraCompanion> {
-        SynaraConnectPage()
-    }
-
-    entry<Screen.SynaraWorkspace> { key ->
-        SynaraWorkspacePage(
-            connection = SynaraConnection(
-                host = key.host,
-                port = key.port,
-                token = key.token,
-                useHttps = key.useHttps,
-            ),
-        )
-    }
-
-    entry<Screen.ZCode> {
-        ZCodePage()
-    }
-
-    entry<Screen.ZCodeSession> { key ->
-        ZCodeSessionPage(url = key.url)
     }
 
     entry<Screen.Setting>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
@@ -255,6 +213,10 @@ internal fun appNavigationEntries(): (NavKey) -> NavEntry<NavKey> = entryProvide
         SettingAgentRuntimeTasksPage()
     }
 
+    entry<Screen.PersonalAgentTasks>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
+        SettingAgentRuntimeTasksPage(showHarnessSettings = false)
+    }
+
     entry<Screen.SettingAgentExecution>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
         SettingAgentExecutionPage()
     }
@@ -335,76 +297,8 @@ internal fun appNavigationEntries(): (NavKey) -> NavEntry<NavKey> = entryProvide
         SettingExperimentalWebMountPage()
     }
 
-    entry<Screen.TodayBoard> {
-        TodayBoardPage()
-    }
-
-    entry<Screen.DeepRead>(
-        // Standalone product opens articles like iOS's
-        // `.zoom` transition — the page rises out of the
-        // card instead of sliding in. The full app keeps
-        // the shared slide.
-        metadata = NavDisplay.transitionSpec {
-            if (StandaloneSurfaces.current == StandaloneSurfaces.DEEP_READ) {
-                (scaleIn(animationSpec = RouteTransitionSpecFloat, initialScale = 0.94f) + fadeIn(tween(220))) togetherWith fadeOut(tween(140))
-            } else {
-                routePushTransition()
-            }
-        } + NavDisplay.popTransitionSpec {
-            if (StandaloneSurfaces.current == StandaloneSurfaces.DEEP_READ) {
-                fadeIn(tween(200)) togetherWith
-                    (scaleOut(animationSpec = RouteTransitionSpecFloat, targetScale = 0.94f) + fadeOut(tween(240)))
-            } else {
-                routePopTransition()
-            }
-        } + NavDisplay.predictivePopTransitionSpec {
-            if (StandaloneSurfaces.current == StandaloneSurfaces.DEEP_READ) {
-                fadeIn(tween(200)) togetherWith
-                    (scaleOut(animationSpec = RouteTransitionSpecFloat, targetScale = 0.94f) + fadeOut(tween(240)))
-            } else {
-                routePopTransition()
-            }
-        },
-    ) { key ->
-        DeepReadScreen(
-            topicId = key.topicId,
-            title = key.title,
-            sourceUrl = key.sourceUrl,
-            initialForceRegenerate = key.forceRegenerate,
-            fromHistory = key.fromHistory,
-        )
-    }
-
-    entry<Screen.DeepReadHistory> {
-        DeepReadHistoryPage()
-    }
-
-    entry<Screen.SettingTodayBoard>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) {
-        SettingTodayBoardPage()
-    }
-
-    entry<Screen.SettingTodayBoardDetail>(metadata = themePageChromeMetadata(ThemePageChrome.Shell)) { key ->
-        SettingTodayBoardPage(paneRoute = key.pane)
-    }
-
-    entry<Screen.DeepReadTemplateWorkbench> {
-        DeepReadTemplateWorkbenchPage()
-    }
-
     entry<Screen.MiniAppList> {
         MiniAppListPage()
-    }
-
-    entry<Screen.NovelProjects> {
-        NovelProjectsPage()
-    }
-
-    entry<Screen.NovelMarkdown> { key ->
-        NovelMarkdownWorkspacePage(
-            projectId = key.projectId,
-            branchSlug = key.branchSlug,
-            jobId = key.jobId,
-        )
     }
 
     entry<Screen.MiniAppRunner> { key ->

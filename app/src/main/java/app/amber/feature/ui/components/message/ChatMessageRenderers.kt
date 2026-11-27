@@ -88,27 +88,21 @@ internal fun VirtualizedAssistantText(
                 val amberTokens = LocalAmberTokens.current
                 val themeRadius = themeBubbleRadius()
                 val themeBorderWidth = themeBubbleBorderWidth()
-                val assistantBubbleShape = themeRadius?.let { RoundedCornerShape(it) }
-                    ?: RoundedCornerShape(
-                    topStart = 14.dp,
-                    topEnd = 14.dp,
-                    bottomStart = 5.dp,
-                    bottomEnd = 14.dp,
-                )
+                val assistantBubbleShape = RoundedCornerShape(themeRadius ?: 18.dp)
                 Surface(
-                    modifier = Modifier.chatBubbleWidth(0.86f),
+                    modifier = Modifier.chatBubbleWidth(0.90f),
                     shape = assistantBubbleShape,
                     color = amberTokens.surface,
                     contentColor = amberTokens.ink,
                     tonalElevation = 0.dp,
                     shadowElevation = 0.dp,
                     border = if (themeBorderWidth == null) {
-                        BorderStroke(1.dp, amberTokens.line)
+                        BorderStroke(0.5.dp, amberTokens.line)
                     } else {
                         themeBorderWidth.takeIf { it > 0.dp }?.let { BorderStroke(it, amberTokens.line) }
                     },
                 ) {
-                    Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                    Column(modifier = Modifier.padding(horizontal = 15.dp, vertical = 12.dp)) {
                         AssistantMarkdownBlockOrWidgets(
                             content = MessageRenderCache.visualRegexText(
                                 text = part.text,
@@ -377,16 +371,16 @@ private fun AssistantBubbleSegment(
 ) {
     val amberTokens = LocalAmberTokens.current
     val themeRadius = themeBubbleRadius()
-    val radiusDp = themeRadius ?: 14.dp
-    val tailRadiusDp = if (themeRadius == null) 5.dp else minOf(themeRadius, 5.dp)
-    val borderWidth = themeBubbleBorderWidth() ?: 1.dp
+    val radiusDp = themeRadius ?: 18.dp
+    val tailRadiusDp = radiusDp
+    val borderWidth = themeBubbleBorderWidth() ?: 0.5.dp
     val shape = RoundedCornerShape(
         topStart = if (first) radiusDp else 0.dp,
         topEnd = if (first) radiusDp else 0.dp,
         bottomStart = if (last) tailRadiusDp else 0.dp,
         bottomEnd = if (last) radiusDp else 0.dp,
     )
-    Box(modifier = Modifier.chatBubbleWidth(0.86f)) {
+    Box(modifier = Modifier.chatBubbleWidth(0.90f)) {
         Box(
             modifier = Modifier
                 .clip(shape)
@@ -473,10 +467,10 @@ private fun AssistantBubbleSegment(
                     }
                 }
                 .padding(
-                    start = 14.dp,
-                    end = 14.dp,
-                    top = if (first) 10.dp else 0.dp,
-                    bottom = if (last) 10.dp else 0.dp,
+                    start = 15.dp,
+                    end = 15.dp,
+                    top = if (first) 12.dp else 0.dp,
+                    bottom = if (last) 12.dp else 0.dp,
                 )
         ) {
             content()

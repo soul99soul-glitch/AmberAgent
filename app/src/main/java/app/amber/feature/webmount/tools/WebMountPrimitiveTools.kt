@@ -12,7 +12,6 @@ import app.amber.feature.webmount.primitives.WebMountSessionOwner
 import app.amber.feature.webmount.profile.ProfileBridge
 import app.amber.feature.webmount.profile.ProfileRegistry
 import app.amber.feature.webmount.usersites.UserSiteRegistry
-import app.amber.feature.ui.pages.zcode.ZCodeUrlStore
 
 /**
  * Thin coordinator for the 23 WebMount primitive tools. All per-tool logic
@@ -49,7 +48,6 @@ class WebMountPrimitiveTools(
     private val oauthStore: WebMountOAuthTokenStore,
     private val settingsStore: SettingsAggregator,
     private val sessionOwner: WebMountSessionOwner,
-    private val zCodeUrlStore: ZCodeUrlStore,
     // Jev 有界目标循环；null 时 wm_run_goal 返回 goal_runner_unavailable。
     private val goalRunner: app.amber.core.jev.JevWebGoalRunner? = null,
 ) {
@@ -112,7 +110,7 @@ class WebMountPrimitiveTools(
         siteAddTool,
         siteRemoveTool,
         profileSynthesizeTool,
-    ).plus(zCodeTools.tools()).map { tool ->
+    ).map { tool ->
         // Tool.execute only receives JSON. Carry the already resolved
         // conversation/run scope through private fields so every factory can
         // acquire the same AGENT lease without introducing global context.
@@ -128,7 +126,6 @@ class WebMountPrimitiveTools(
 
     private val openTool by lazy { createOpenTool(deps, profileRegistry, cookieProvider, manager) }
     private val goalTool by lazy { createGoalTool(deps, goalRunner) }
-    private val zCodeTools by lazy { WebMountZCodeTools(deps, zCodeUrlStore, manager) }
     private val stateTool by lazy { createStateTool(deps, profileRegistry, cookieProvider, manager) }
     private val observeTool by lazy { createObserveTool(deps) }
     private val extractTool by lazy { createExtractTool(deps) }

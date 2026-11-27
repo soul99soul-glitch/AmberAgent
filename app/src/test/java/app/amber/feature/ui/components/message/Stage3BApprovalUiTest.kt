@@ -233,7 +233,6 @@ class Stage3BApprovalUiTest {
             TestTheme(dark = true) {
                 TasksSection(
                     sessions = listOf(l3Session, l2Session),
-                    synaraURL = null,
                     busy = false,
                     onMonitoredChange = { _, _ -> },
                     onDecision = { _, _, _ -> },

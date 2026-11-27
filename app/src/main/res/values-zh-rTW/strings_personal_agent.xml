@@ -8,7 +8,6 @@
     <string name="personal_agent_host_cloud_desc_unpaired">請先配對閘道</string>
     <string name="personal_agent_sessions">工作階段</string>
     <string name="personal_agent_more">更多</string>
-    <string name="personal_agent_menu_today_board">今日看板</string>
     <string name="personal_agent_menu_paired_gateway">配對閘道</string>
     <string name="personal_agent_menu_paired_gateway_connected">已連線：%1$s</string>
     <string name="personal_agent_menu_paired_gateway_unpaired">未配對</string>
@@ -41,7 +40,6 @@
     <string name="personal_agent_drawer_section_features">常用功能與設定</string>
     <string name="personal_agent_drawer_phone_automation">手機自動化</string>
     <string name="personal_agent_drawer_phone_automation_desc">虛擬螢幕與執行設定</string>
-    <string name="personal_agent_drawer_today_board_desc">背景任務與今日看板</string>
     <string name="personal_agent_drawer_all_sessions">全部工作階段歷史</string>
     <string name="personal_agent_drawer_all_sessions_desc">管理全部話題</string>
     <string name="personal_agent_drawer_shelf">對話產物</string>
@@ -52,4 +50,23 @@
     <string name="personal_agent_drawer_current_badge">目前</string>
     <string name="personal_agent_drawer_untitled_topic">新對話</string>
     <string name="personal_agent_host_menu_gateway_settings">配對閘道設定…</string>
+    <string name="personal_agent_top_shelf_a11y">產物架</string>
+    <string name="chat_shelf_empty_title">本對話還沒有產物</string>
+    <string name="chat_shelf_close_a11y">關閉產物架</string>
+    <string name="composer_thinking_unavailable_title">思考等級未啟用</string>
+    <string name="composer_thinking_no_model_desc">請先在左側選擇模型以調整思考等級。</string>
+    <string name="composer_thinking_unsupported_desc">目前模型未標記支援思考深度調整。</string>
+    <string name="composer_context_title">上下文統計</string>
+    <string name="composer_context_messages">總訊息數</string>
+    <string name="composer_context_window">上下文</string>
+    <string name="composer_context_speed">速度</string>
+    <string name="composer_context_speed_empty">暫無</string>
+    <string name="composer_context_cache_hit">快取命中率</string>
+    <string name="composer_context_compacting">正在壓縮上下文</string>
+    <string name="composer_context_compact_action">壓縮上下文</string>
+    <string name="personal_agent_panel_close_a11y">關閉面板</string>
+    <string name="personal_agent_tasks_subtitle">背景與多終端執行任務</string>
+    <string name="personal_agent_center_subtitle">提醒、監控與主動觸發</string>
+    <string name="personal_agent_tasks_active_section">執行中</string>
+    <string name="personal_agent_tasks_history_section">排程與執行任務</string>
 </resources>

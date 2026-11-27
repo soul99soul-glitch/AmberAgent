@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="setting_home_multi_device_title">Amber 멀티 디바이스</string>
+    <string name="setting_home_multi_device_subtitle">클라우드 · Mac</string>
+</resources>

@@ -26,7 +26,6 @@ data class AgentDescriptor(
 
 enum class AgentCapability {
     CHAT_TURN,
-    DEEP_READ,
     TOOL_USE,
     SUB_AGENT,
     BACKGROUND,

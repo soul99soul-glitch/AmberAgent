@@ -43,7 +43,7 @@
   <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
   <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
   <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
-  <!-- Android 17+: required for LAN sockets, e.g. connecting to a Mac-hosted Synara. -->
+  <!-- Android 17+: required for local network endpoints. -->
   <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
   <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
   <!-- Health Connect platform permissions (API 34+; no Jetpack client dependency). -->

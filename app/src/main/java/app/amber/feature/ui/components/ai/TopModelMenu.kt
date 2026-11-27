@@ -291,7 +291,7 @@ fun TopModelMenu(
 }
 
 @Composable
-private fun ModelMenuReasoningFooter(
+internal fun ModelMenuReasoningFooter(
     currentLevel: ReasoningLevel,
     levels: List<Pair<ReasoningLevel, String>>,
     onChange: (ReasoningLevel) -> Unit,

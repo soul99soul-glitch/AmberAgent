@@ -22,6 +22,7 @@ import app.amber.feature.macgateway.ProactiveDeliveryReceipts
 import app.amber.feature.macgateway.ProactiveDeepLinkInbox
 import app.amber.feature.macgateway.ProactiveFeedbackExecutor
 import app.amber.feature.macgateway.ProactiveNotificationPresenter
+import app.amber.feature.prompts.AgentPersonaAvatarStore
 import app.amber.feature.prompts.AgentSoulStore
 import org.koin.dsl.module
 
@@ -42,13 +43,14 @@ val appModule = module {
     }
 
     // AppScope is a `class AppScope : CoroutineScope`, so it registers under AppScope, not
-    // CoroutineScope. Anything asking for a bare CoroutineScope needs this alias (previously
-    // it was satisfied by a stray CoroutineScope binding in the novel module).
+    // Components that ask for a bare CoroutineScope share the app scope.
     single<kotlinx.coroutines.CoroutineScope> { get<AppScope>() }
 
     single {
         AgentSoulStore(context = get<Context>())
     }
+
+    single { AgentPersonaAvatarStore(get()) }
 
     single {
         ProactiveDeliveryReceipts(
