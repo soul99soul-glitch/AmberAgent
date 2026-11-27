@@ -4,9 +4,11 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.padding
@@ -32,6 +34,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -502,6 +506,12 @@ private fun ChatComposerCloudStatusDockHost(
     }
 }
 
+internal val PersonalAgentSuggestionChipMinHeight = 28.dp
+internal val PersonalAgentSuggestionChipHorizontalPadding = 12.dp
+internal val PersonalAgentSuggestionChipVerticalPadding = 5.dp
+internal val PersonalAgentSuggestionChipFontSize = 12.5.sp
+internal val PersonalAgentSuggestionChipLineHeight = 16.sp
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PersonalAgentSuggestionStrip(
@@ -513,9 +523,9 @@ private fun PersonalAgentSuggestionStrip(
     LazyRow(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 4.dp, bottom = 6.dp),
+            .padding(top = 2.dp, bottom = 5.dp),
         contentPadding = PaddingValues(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         items(
@@ -535,16 +545,28 @@ private fun PersonalAgentSuggestionStrip(
                 border = BorderStroke(0.5.dp, tokens.floatingOutline),
                 tonalElevation = 0.dp,
             ) {
-                Text(
-                    text = suggestion,
-                    color = tokens.ink2,
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp,
-                    fontWeight = FontWeight.Normal,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                )
+                Box(
+                    modifier = Modifier
+                        .defaultMinSize(minHeight = PersonalAgentSuggestionChipMinHeight)
+                        .padding(
+                            horizontal = PersonalAgentSuggestionChipHorizontalPadding,
+                            vertical = PersonalAgentSuggestionChipVerticalPadding,
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = suggestion,
+                        style = TextStyle(
+                            color = tokens.ink2,
+                            fontSize = PersonalAgentSuggestionChipFontSize,
+                            lineHeight = PersonalAgentSuggestionChipLineHeight,
+                            fontWeight = FontWeight.Normal,
+                            platformStyle = PlatformTextStyle(includeFontPadding = false),
+                        ),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
     }

@@ -36,7 +36,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -54,14 +56,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.PI
+import kotlin.math.max
 import kotlin.math.sin
 import com.composables.icons.lucide.Lucide
 import com.composables.icons.lucide.PackageOpen
 import app.amber.agent.R
+import app.amber.ai.core.MessageRole
+import app.amber.ai.ui.UIMessage
 import app.amber.core.context.CompactLifecycleState
 import app.amber.core.context.CompactSummaryPayloads
 import app.amber.core.context.ConversationCompact
+import app.amber.feature.ui.components.message.hasRenderableChatMessageContent
 import app.amber.feature.ui.components.ui.workspaceColors
+import app.amber.feature.ui.theme.AmberTokens
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.LocalAmberType
 
@@ -257,9 +264,90 @@ internal fun ChatTaskWaveDots(
     }
 }
 
+internal data class InlineStatusShimmerColors(
+    val baseInk: Color,
+    val edgeInk: Color,
+    val peakInk: Color,
+)
+
+internal data class InlineStatusShimmerRange(
+    val startX: Float,
+    val endX: Float,
+    val bandWidthPx: Float,
+)
+
+/**
+ * Resolves the muted secondary ink and high-luminance sweeping glint for the
+ * Personal Agent single-line status indicator, keeping status text visibly
+ * softer than body copy ([AmberTokens.ink]) and ensuring clear shimmer contrast
+ * across both light paper and dark graphite themes.
+ */
+internal fun resolveInlineStatusShimmerColors(tokens: AmberTokens): InlineStatusShimmerColors {
+    val baseInk = tokens.ink3
+    val peakInk = if (tokens.isDark) {
+        lerp(tokens.ink, Color.White, 0.65f)
+    } else {
+        val paperWhite = lerp(tokens.bg, Color.White, 0.65f)
+        lerp(baseInk, paperWhite, 0.78f)
+    }
+    val edgeInk = lerp(baseInk, peakInk, 0.45f)
+    return InlineStatusShimmerColors(
+        baseInk = baseInk,
+        edgeInk = edgeInk,
+        peakInk = peakInk,
+    )
+}
+
+/**
+ * Computes the horizontal gradient span for the sweeping shimmer band based on
+ * the measured glyph width (matching iOS `ChatTaskProgressTextShimmer`), so short
+ * status labels don't spend most of the 1.8s cycle sweeping through empty space.
+ */
+internal fun computeInlineStatusShimmerRange(
+    textWidthPx: Float,
+    minBandWidthPx: Float,
+    progress: Float,
+): InlineStatusShimmerRange {
+    val clampedWidth = textWidthPx.coerceAtLeast(1f)
+    val bandWidthPx = max(clampedWidth * 0.48f, minBandWidthPx.coerceAtLeast(1f))
+    val clampedProgress = progress.coerceIn(0f, 1f)
+    val startX = -bandWidthPx + (clampedWidth + bandWidthPx * 2f) * clampedProgress
+    return InlineStatusShimmerRange(
+        startX = startX,
+        endX = startX + bandWidthPx,
+        bandWidthPx = bandWidthPx,
+    )
+}
+
+/**
+ * Mirrors `ChatMessage` + `ChatMessageAssistantAvatar`'s header visibility guard so
+ * the waiting/tail indicator shows the persona name before the assistant header
+ * exists and yields immediately once the assistant message renders its own name.
+ */
+internal fun hasRenderedAssistantMessageHeader(
+    lastMessage: UIMessage?,
+    hasResolvedModel: Boolean,
+    showModelName: Boolean,
+): Boolean {
+    if (!showModelName || !hasResolvedModel || lastMessage == null) return false
+    return lastMessage.role == MessageRole.ASSISTANT &&
+        lastMessage.parts.hasRenderableChatMessageContent()
+}
+
+internal fun resolveWaitingIndicatorAgentName(
+    isPersonalAgent: Boolean,
+    showModelName: Boolean,
+    hasRenderedAssistantHeader: Boolean,
+    agentDisplayName: String?,
+): String? {
+    if (!isPersonalAgent || !showModelName || hasRenderedAssistantHeader) return null
+    return agentDisplayName?.trim()?.takeIf { it.isNotEmpty() }
+}
+
 @Composable
 internal fun AgentWorkingIndicator(
     processingStatus: String?,
+    agentDisplayName: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val isPersonalAgent = LocalChatStageMode.current is ChatStageMode.PersonalAgent
@@ -269,8 +357,11 @@ internal fun AgentWorkingIndicator(
     }
     val statusText = processingStatus?.trim()?.takeIf { it.isNotEmpty() }
         ?: stringResource(R.string.chat_inline_status_preparing_reply)
+    val headerLabel = agentDisplayName?.trim()?.takeIf { it.isNotEmpty() }
     val tokens = LocalAmberTokens.current
     val amberType = LocalAmberType.current
+    val chatTheme = LocalChatTheme.current
+    val shimmerColors = remember(tokens) { resolveInlineStatusShimmerColors(tokens) }
     val shimmerTransition = rememberInfiniteTransition(label = "inline_status_shimmer")
     val shimmerProgress by shimmerTransition.animateFloat(
         initialValue = 0f,
@@ -282,58 +373,83 @@ internal fun AgentWorkingIndicator(
         label = "shimmer_progress",
     )
     val density = LocalDensity.current
-    val sweepSpanPx = with(density) { 240.dp.toPx() }
-    val bandWidthPx = with(density) { 88.dp.toPx() }
-    val baseInk = tokens.ink2.copy(alpha = 0.88f)
-    val highlightInk = if (tokens.isDark) {
-        lerp(tokens.ink, Color.White, 0.35f)
-    } else {
-        lerp(tokens.ink2, tokens.accent, 0.45f)
-    }
-    val startX = -bandWidthPx + (sweepSpanPx + bandWidthPx * 2f) * shimmerProgress
-    val textBrush = Brush.linearGradient(
-        colorStops = arrayOf(
-            0.0f to baseInk,
-            0.38f to baseInk,
-            0.50f to highlightInk,
-            0.62f to baseInk,
-            1.0f to baseInk,
-        ),
-        start = Offset(startX, 0f),
-        end = Offset(startX + bandWidthPx, 0f),
-    )
+    val fallbackTextWidthPx = with(density) { 112.dp.toPx() }
+    val minBandWidthPx = with(density) { 36.dp.toPx() }
 
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .heightIn(min = 30.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        ChatTaskWaveDots(tint = tokens.accent)
-        AnimatedContent(
-            targetState = statusText,
-            modifier = Modifier.weight(1f),
-            transitionSpec = {
-                val enter = fadeIn(tween(180, easing = FastOutSlowInEasing)) +
-                    slideInVertically(tween(200, easing = FastOutSlowInEasing)) { it / 3 }
-                val exit = fadeOut(tween(120, easing = FastOutSlowInEasing)) +
-                    slideOutVertically(tween(140, easing = FastOutSlowInEasing)) { -it / 3 }
-                (enter togetherWith exit).using(SizeTransform(clip = true))
-            },
-            label = "inline_working_status",
-        ) { line ->
+        if (headerLabel != null) {
             Text(
-                text = line,
-                style = amberType.secondary.copy(
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp,
-                    fontWeight = FontWeight.Medium,
-                    brush = textBrush,
-                ),
+                text = headerLabel,
+                style = amberType.meta.copy(fontWeight = FontWeight.Bold),
+                color = chatTheme.accent,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 30.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            ChatTaskWaveDots(tint = tokens.accent)
+            AnimatedContent(
+                targetState = statusText,
+                modifier = Modifier.weight(1f),
+                transitionSpec = {
+                    val enter = fadeIn(tween(180, easing = FastOutSlowInEasing)) +
+                        slideInVertically(tween(200, easing = FastOutSlowInEasing)) { it / 3 }
+                    val exit = fadeOut(tween(120, easing = FastOutSlowInEasing)) +
+                        slideOutVertically(tween(140, easing = FastOutSlowInEasing)) { -it / 3 }
+                    (enter togetherWith exit).using(SizeTransform(clip = true))
+                },
+                label = "inline_working_status",
+            ) { line ->
+                var measuredTextWidthPx by remember(line) { mutableFloatStateOf(0f) }
+                val effectiveWidthPx = if (measuredTextWidthPx > 0f) measuredTextWidthPx else fallbackTextWidthPx
+                val shimmerRange = computeInlineStatusShimmerRange(
+                    textWidthPx = effectiveWidthPx,
+                    minBandWidthPx = minBandWidthPx,
+                    progress = shimmerProgress,
+                )
+                val textBrush = Brush.linearGradient(
+                    colorStops = arrayOf(
+                        0.00f to shimmerColors.baseInk,
+                        0.22f to shimmerColors.baseInk,
+                        0.38f to shimmerColors.edgeInk,
+                        0.50f to shimmerColors.peakInk,
+                        0.62f to shimmerColors.edgeInk,
+                        0.78f to shimmerColors.baseInk,
+                        1.00f to shimmerColors.baseInk,
+                    ),
+                    start = Offset(shimmerRange.startX, 0f),
+                    end = Offset(shimmerRange.endX, 0f),
+                )
+                Text(
+                    text = line,
+                    style = amberType.secondary.copy(
+                        fontSize = 14.sp,
+                        lineHeight = 20.sp,
+                        fontWeight = FontWeight.Medium,
+                        brush = textBrush,
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    onTextLayout = { layoutResult ->
+                        if (layoutResult.lineCount > 0) {
+                            val width = (layoutResult.getLineRight(0) - layoutResult.getLineLeft(0))
+                                .coerceAtLeast(1f)
+                            if (width != measuredTextWidthPx) {
+                                measuredTextWidthPx = width
+                            }
+                        }
+                    },
+                )
+            }
         }
     }
 }
@@ -342,13 +458,14 @@ internal fun AgentWorkingIndicator(
 internal fun TimelineTailWorkingIndicator(
     processingStatus: String?,
     visible: Boolean,
+    agentDisplayName: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val isPersonalAgent = LocalChatStageMode.current is ChatStageMode.PersonalAgent
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(AgentWorkingIndicatorReserveHeight),
+            .heightIn(min = AgentWorkingIndicatorReserveHeight),
         // Top-aligned: the dot/status line hugs the streaming content above it.
         // Personal Agent left-aligns the indicator with the assistant reading column (iOS/HarmonyOS parity).
         contentAlignment = if (isPersonalAgent) Alignment.TopStart else Alignment.TopCenter,
@@ -364,6 +481,7 @@ internal fun TimelineTailWorkingIndicator(
         if (dotAlpha > 0.01f) {
             AgentWorkingIndicator(
                 processingStatus = processingStatus,
+                agentDisplayName = agentDisplayName,
                 modifier = Modifier.alpha(dotAlpha),
             )
         }
@@ -373,6 +491,8 @@ internal fun TimelineTailWorkingIndicator(
 @Composable
 internal fun PostSendWaitingIndicator(
     visible: Boolean,
+    processingStatus: String? = null,
+    agentDisplayName: String? = null,
     modifier: Modifier = Modifier,
 ) {
     if (!visible) {
@@ -383,8 +503,9 @@ internal fun PostSendWaitingIndicator(
         return
     }
     TimelineTailWorkingIndicator(
-        processingStatus = null,
+        processingStatus = processingStatus,
         visible = true,
+        agentDisplayName = agentDisplayName,
         modifier = modifier,
     )
 }

@@ -52,6 +52,7 @@ import androidx.compose.ui.platform.LocalScrollCaptureInProgress
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import app.amber.ai.ui.UIMessage
@@ -67,6 +68,8 @@ import app.amber.core.model.MessageNode
 import app.amber.core.service.ChatError
 import app.amber.core.service.ConversationTimelineLoadState
 import app.amber.core.service.PendingUserMessage
+import app.amber.feature.prompts.AgentSoulStore
+import app.amber.feature.ui.components.message.resolveAgentPersonaDisplayName
 import app.amber.feature.ui.components.message.resolveThemeTryOnCardTarget
 import app.amber.feature.ui.components.ui.ErrorCardsDisplay
 import app.amber.feature.ui.theme.ThemePackageManager
@@ -161,6 +164,11 @@ internal fun ChatListNormal(
     }
     if ((BuildConfig.DEBUG || BuildConfig.CHAT_PERF_TRACE)) Trace.beginSection("Amber ChatListNormal scaffold")
     val themePackageManager = koinInject<ThemePackageManager>()
+    val agentSoulStore = koinInject<AgentSoulStore>()
+    val soulState by agentSoulStore.state.collectAsStateWithLifecycle()
+    val waitingAgentDisplayName = remember(soulState.isDefault, soulState.displayName) {
+        resolveAgentPersonaDisplayName(soulState.isDefault, soulState.displayName)
+    }
     val activeThemeTryOn by themePackageManager.tryOn.collectAsState(initial = null)
     val themeTryOnCardTarget = remember(
         conversation.messageNodes,
@@ -390,6 +398,7 @@ internal fun ChatListNormal(
                             tailIndicatorDotVisible = tailPresentation.dotVisible,
                             showBottomFollowAnimation = showBottomFollowAnimation,
                             processingStatus = processingStatus,
+                            agentDisplayName = waitingAgentDisplayName,
                             settings = settings,
                             themeTryOnCardTarget = themeTryOnCardTarget,
                             onRegenerate = onRegenerate,

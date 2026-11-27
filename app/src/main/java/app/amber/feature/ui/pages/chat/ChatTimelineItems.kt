@@ -98,6 +98,7 @@ internal fun LazyListScope.chatTimelineItems(
     tailIndicatorDotVisible: Boolean,
     showBottomFollowAnimation: Boolean,
     processingStatus: String?,
+    agentDisplayName: String? = null,
     settings: Settings,
     themeTryOnCardTarget: ThemeTryOnCardTarget?,
     onRegenerate: (UIMessage) -> Unit,
@@ -399,8 +400,16 @@ internal fun LazyListScope.chatTimelineItems(
             }
 
             ChatTimelineEntry.PostSendWaitingAssistant -> {
+                val waitingAgentHeader = resolveWaitingIndicatorAgentName(
+                    isPersonalAgent = LocalChatStageMode.current is ChatStageMode.PersonalAgent,
+                    showModelName = settings.displaySetting.showModelName,
+                    hasRenderedAssistantHeader = false,
+                    agentDisplayName = agentDisplayName,
+                )
                 PostSendWaitingIndicator(
                     visible = showBottomFollowAnimation,
+                    processingStatus = processingStatus,
+                    agentDisplayName = waitingAgentHeader,
                     modifier = Modifier.padding(bottom = TimelineItemSpacing),
                 )
             }
@@ -443,11 +452,43 @@ internal fun LazyListScope.chatTimelineItems(
             }
 
             ChatTimelineEntry.TimelineTail -> {
+                val lastMessage = conversation.messageNodes.lastOrNull()?.currentMessage
+                val lastMessageHasResolvedModel = remember(
+                    lastMessage?.modelId,
+                    lastMessage?.role,
+                    timelineLoading,
+                    settings.providers,
+                    settings.chatModelId,
+                ) {
+                    if (lastMessage == null) {
+                        false
+                    } else {
+                        val resolved = lastMessage.modelId?.let { settings.findModelById(it) }
+                            ?: if (timelineLoading && lastMessage.role == MessageRole.ASSISTANT) {
+                                settings.getCurrentChatModel()
+                            } else {
+                                null
+                            }
+                        resolved != null
+                    }
+                }
+                val lastNodeHasAssistantHeader = hasRenderedAssistantMessageHeader(
+                    lastMessage = lastMessage,
+                    hasResolvedModel = lastMessageHasResolvedModel,
+                    showModelName = settings.displaySetting.showModelName,
+                )
+                val tailAgentHeader = resolveWaitingIndicatorAgentName(
+                    isPersonalAgent = LocalChatStageMode.current is ChatStageMode.PersonalAgent,
+                    showModelName = settings.displaySetting.showModelName,
+                    hasRenderedAssistantHeader = lastNodeHasAssistantHeader,
+                    agentDisplayName = agentDisplayName,
+                )
                 Column(modifier = Modifier.fillMaxWidth()) {
                     if (tailIndicatorReserveVisible) {
                         TimelineTailWorkingIndicator(
                             processingStatus = processingStatus,
                             visible = tailIndicatorDotVisible,
+                            agentDisplayName = tailAgentHeader,
                             modifier = Modifier.padding(bottom = TimelineItemSpacing),
                         )
                     }

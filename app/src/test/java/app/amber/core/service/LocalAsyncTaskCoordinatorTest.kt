@@ -424,6 +424,97 @@ class LocalAsyncTaskCoordinatorTest : DurableRuntimeTestBase() {
         }
     }
 
+    @Test
+    fun `deriveLocalTaskSingleLineProgress never leaks assistant prose or raw reasoning and keeps tool statuses`() {
+        val proseReply = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(UIMessagePart.Text("宝宝，赵大哥首选大葱蘸甜面酱！热乎大饼抹一勺酱")),
+        )
+        assertEquals("正在整理回复", deriveLocalTaskSingleLineProgress(proseReply))
+
+        val reasoningReply = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(UIMessagePart.Reasoning(reasoning = "先回忆宋朝饮食习惯，再组织幽默回复", finishedAt = null)),
+        )
+        assertEquals("正在思考…", deriveLocalTaskSingleLineProgress(reasoningReply))
+
+        val runningToolReply = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(
+                UIMessagePart.Text("已经开始查资料"),
+                UIMessagePart.Tool(
+                    toolCallId = "tool-1",
+                    toolName = "web_search",
+                    input = "{}",
+                    approvalState = ToolApprovalState.Auto,
+                ),
+            ),
+        )
+        assertEquals("执行工具：web_search", deriveLocalTaskSingleLineProgress(runningToolReply))
+
+        val pendingToolReply = UIMessage(
+            role = MessageRole.ASSISTANT,
+            parts = listOf(
+                UIMessagePart.Tool(
+                    toolCallId = "tool-2",
+                    toolName = "run_shell",
+                    input = "{}",
+                    approvalState = ToolApprovalState.Pending,
+                ),
+            ),
+        )
+        assertEquals("等待工具审批：run_shell", deriveLocalTaskSingleLineProgress(pendingToolReply))
+    }
+
+    @Test
+    fun `streaming assistant text keeps concise status without leaking body prose and preserves explicit processingStatus`() = runBlocking {
+        withTimeout(15_000) {
+            val fixture = createFixture(maxConcurrentTasks = 3)
+            val convId = Uuid.random()
+            fixture.repo.insertConversation(Conversation.ofId(convId))
+            fixture.store.ensureInitialized(convId)
+
+            val proseGate = CompletableDeferred<Unit>()
+            val statusGate = CompletableDeferred<Unit>()
+            val finishGate = CompletableDeferred<Unit>()
+
+            fixture.runner.onTurn("大饼卷啥") { session ->
+                emit(
+                    GenerationChunk.Messages(
+                        session.messages + UIMessage.assistant("宝宝，赵大哥首选大葱蘸甜面酱！热乎大饼抹一勺酱"),
+                    ),
+                )
+                proseGate.complete(Unit)
+                statusGate.await()
+                session.processingStatus.value = "正在识别图片…"
+                emit(
+                    GenerationChunk.Messages(
+                        session.messages + UIMessage.assistant("宝宝，赵大哥首选大葱蘸甜面酱！热乎大饼抹一勺酱，再夹两片酱牛肉"),
+                    ),
+                )
+                finishGate.await()
+            }
+
+            assertTrue(fixture.coordinator.submitMessage(convId, listOf(UIMessagePart.Text("大饼卷啥"))))
+            proseGate.await()
+
+            val activeTask = fixture.coordinator.uiState.value
+                .activeTasksForConversation(convId.toString())
+                .single()
+            assertEquals("正在整理回复", activeTask.progressText)
+            assertFalse(activeTask.progressText.orEmpty().contains("大葱"))
+
+            statusGate.complete(Unit)
+            val ocrStatus = fixture.coordinator.uiState.first { state ->
+                state.activeTasksForConversation(convId.toString()).singleOrNull()?.progressText == "正在识别图片…"
+            }.activeTasksForConversation(convId.toString()).single().progressText
+            assertEquals("正在识别图片…", ocrStatus)
+
+            finishGate.complete(Unit)
+            fixture.runner.awaitTurnCompleted("大饼卷啥")
+        }
+    }
+
     private fun createFixture(
         maxConcurrentTasks: Int = 3,
         recoveryFile: File = File(directory.newFolder(), "recovery.json"),

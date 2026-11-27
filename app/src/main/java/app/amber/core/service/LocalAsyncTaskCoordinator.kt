@@ -767,7 +767,7 @@ class LocalAsyncTaskCoordinator(
                         RunExecutionPhase.WAITING_APPROVAL ->
                             activeToolName?.let { "等待工具审批：$it" } ?: "等待工具审批…"
                         RunExecutionPhase.THINKING ->
-                            task.progressText ?: "正在思考…"
+                            task.processingStatus.value?.takeIf { it.isNotBlank() } ?: "正在思考…"
                     }
                     if (!derived.isNullOrBlank() && derived != task.progressText) {
                         task.progressText = derived
@@ -810,9 +810,9 @@ class LocalAsyncTaskCoordinator(
         ownedSlice.forEach { task.streamedMessageIds.add(it.id) }
 
         val lastAssistant = ownedSlice.lastOrNull { it.role == MessageRole.ASSISTANT }
-        if (lastAssistant != null) {
+        if (lastAssistant != null && task.processingStatus.value.isNullOrBlank()) {
             val singleLine = deriveSingleLineProgress(lastAssistant)
-            if (!singleLine.isNullOrBlank()) {
+            if (!singleLine.isNullOrBlank() && singleLine != task.progressText) {
                 task.progressText = singleLine
                 publishUiState()
             }
@@ -1316,32 +1316,8 @@ class LocalAsyncTaskCoordinator(
         json.decodeFromString(ListSerializer(PersistedLocalTaskRecord.serializer()), recoveryFile.readText())
     }.getOrDefault(emptyList())
 
-    private fun deriveSingleLineProgress(assistantMessage: UIMessage): String? {
-        val unexecutedTool = assistantMessage.parts
-            .filterIsInstance<UIMessagePart.Tool>()
-            .lastOrNull { !it.isExecuted }
-        if (unexecutedTool != null) {
-            return if (unexecutedTool.isPending) {
-                "等待工具审批：${unexecutedTool.toolName}"
-            } else {
-                "执行工具：${unexecutedTool.toolName}"
-            }
-        }
-        val activeReasoning = assistantMessage.parts
-            .filterIsInstance<UIMessagePart.Reasoning>()
-            .lastOrNull { it.finishedAt == null && it.reasoning.isNotBlank() }
-        if (activeReasoning != null) {
-            val line = activeReasoning.reasoning.lineSequence().map { it.trim() }.lastOrNull { it.isNotEmpty() }
-            if (!line.isNullOrBlank()) return line.take(72)
-        }
-        val textLine = assistantMessage.parts
-            .filterIsInstance<UIMessagePart.Text>()
-            .asReversed()
-            .firstNotNullOfOrNull { part ->
-                part.text.lineSequence().map { it.trim() }.lastOrNull { it.isNotEmpty() }
-            }
-        return textLine?.take(72)
-    }
+    internal fun deriveSingleLineProgress(assistantMessage: UIMessage): String? =
+        deriveLocalTaskSingleLineProgress(assistantMessage)
 
     private fun cancelToolByUser(tool: UIMessagePart.Tool): UIMessagePart.Tool {
         val cancellation = UIMessagePart.Text(
@@ -1352,4 +1328,36 @@ class LocalAsyncTaskCoordinator(
             approvalState = ToolApprovalState.Denied("Generation cancelled by user"),
         ).withSettledCredentialArgumentsRedacted()
     }
+}
+
+/**
+ * Derives a concise single-line execution status for an active local assistant turn.
+ *
+ * Strictly reports status only (tool execution / approval / thinking / preparing reply) and
+ * never leaks raw streaming assistant reply prose or chain-of-thought text into the status line.
+ */
+internal fun deriveLocalTaskSingleLineProgress(assistantMessage: UIMessage): String? {
+    val unexecutedTool = assistantMessage.parts
+        .filterIsInstance<UIMessagePart.Tool>()
+        .lastOrNull { !it.isExecuted }
+    if (unexecutedTool != null) {
+        return if (unexecutedTool.isPending) {
+            "等待工具审批：${unexecutedTool.toolName}"
+        } else {
+            "执行工具：${unexecutedTool.toolName}"
+        }
+    }
+    val activeReasoning = assistantMessage.parts
+        .filterIsInstance<UIMessagePart.Reasoning>()
+        .lastOrNull { it.finishedAt == null && it.reasoning.isNotBlank() }
+    if (activeReasoning != null) {
+        return "正在思考…"
+    }
+    val hasAssistantText = assistantMessage.parts
+        .filterIsInstance<UIMessagePart.Text>()
+        .any { it.text.isNotBlank() }
+    if (hasAssistantText) {
+        return "正在整理回复"
+    }
+    return null
 }

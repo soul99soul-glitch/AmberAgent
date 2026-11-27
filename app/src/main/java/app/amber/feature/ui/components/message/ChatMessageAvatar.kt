@@ -61,6 +61,15 @@ fun ChatMessageUserAvatar(
     }
 }
 
+internal fun resolveAgentPersonaDisplayName(
+    isDefault: Boolean,
+    displayName: String,
+): String = if (isDefault) {
+    "amber"
+} else {
+    displayName.trim().ifBlank { "amber" }
+}
+
 @Composable
 fun ChatMessageAssistantAvatar(
     message: UIMessage,
@@ -73,11 +82,7 @@ fun ChatMessageAssistantAvatar(
     val soulState by agentSoulStore.state.collectAsStateWithLifecycle()
     var showSoulSheet by remember { mutableStateOf(false) }
     if (message.role == MessageRole.ASSISTANT && model != null && showName) {
-        val displayLabel = if (soulState.isDefault) {
-            "amber"
-        } else {
-            soulState.displayName.ifBlank { "amber" }
-        }
+        val displayLabel = resolveAgentPersonaDisplayName(soulState.isDefault, soulState.displayName)
         Text(
             text = displayLabel,
             modifier = modifier.clickable { showSoulSheet = true },
