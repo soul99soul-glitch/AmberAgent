@@ -43,6 +43,7 @@ import app.amber.feature.ui.utils.amberTraceMeasure
 import app.amber.core.utils.copyMessageToClipboard
 import app.amber.core.settings.ChatFontFamily
 import app.amber.core.settings.DisplaySetting
+import app.amber.core.settings.ReplyDeliveryMode
 import app.amber.core.utils.base64Encode
 
 internal fun List<UIMessagePart>.hasRenderableChatMessageContent(): Boolean {
@@ -56,6 +57,60 @@ internal fun List<UIMessagePart>.hasRenderableChatMessageContent(): Boolean {
             is UIMessagePart.MiniApp -> part.appId.isNotBlank()
             is UIMessagePart.Reasoning -> part.reasoning.isNotBlank()
             is UIMessagePart.Tool -> true
+        }
+    }
+}
+
+/**
+ * Mirrors whether `MessagePartsBlock` actually renders any visible body/card right now.
+ *
+ * In `ReplyDeliveryMode.SEGMENTED_BLOCKS` while streaming, an assistant message whose only
+ * trailing part is an uncommitted in-flight prose fragment renders nothing yet; withholding
+ * the persona header and outer item spacing until a real block (committed text paragraph,
+ * tool/thinking card, or media) appears prevents the persona label and inline status line
+ * from jumping during the waiting -> thinking -> preparing-reply handoff.
+ */
+internal fun List<UIMessagePart>.hasVisibleChatMessageContent(
+    role: MessageRole,
+    loading: Boolean,
+    replyDeliveryMode: ReplyDeliveryMode,
+    regexes: List<AssistantRegex> = emptyList(),
+): Boolean {
+    if (role != MessageRole.ASSISTANT || !loading || replyDeliveryMode != ReplyDeliveryMode.SEGMENTED_BLOCKS) {
+        return hasRenderableChatMessageContent()
+    }
+    val grouped = groupMessageParts()
+    if (grouped.isEmpty()) return false
+    val lastIdx = grouped.lastIndex
+    return grouped.withIndex().any { (idx, block) ->
+        when (block) {
+            is MessagePartBlock.ThinkingBlock -> block.steps.isNotEmpty()
+            is MessagePartBlock.SubAgentBlock,
+            is MessagePartBlock.CouncilBlock -> true
+            is MessagePartBlock.ContentBlock -> when (val part = block.part) {
+                is UIMessagePart.Text -> {
+                    val displayText = MessageRenderCache.displayMarkdownText(
+                        text = part.text,
+                        regexes = regexes,
+                        role = MessageRole.ASSISTANT,
+                    )
+                    if (idx == lastIdx) {
+                        committedSegmentedReplyPrefix(
+                            text = displayText,
+                            isStreaming = true,
+                        ).isNotEmpty()
+                    } else {
+                        displayText.isNotBlank()
+                    }
+                }
+                is UIMessagePart.Image -> part.url.isNotBlank()
+                is UIMessagePart.Document -> part.url.isNotBlank()
+                is UIMessagePart.Video -> part.url.isNotBlank()
+                is UIMessagePart.Audio -> part.url.isNotBlank()
+                is UIMessagePart.MiniApp -> part.appId.isNotBlank()
+                is UIMessagePart.Reasoning -> part.reasoning.isNotBlank()
+                is UIMessagePart.Tool -> true
+            }
         }
     }
 }
@@ -102,6 +157,12 @@ fun ChatMessage(
     val searchPresentation = rememberSearchPresentation(message.parts)
     val searchSources = searchPresentation.sources.takeIf { it.isNotEmpty }
     val searchImageUrls = searchPresentation.imageUrls
+    val hasVisibleContent = message.parts.hasVisibleChatMessageContent(
+        role = message.role,
+        loading = loading,
+        replyDeliveryMode = settings.replyDeliveryMode,
+        regexes = regexes,
+    )
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -112,9 +173,9 @@ fun ChatMessage(
             )
             .amberTraceMeasure("Amber ChatMessage ${message.role.name.lowercase()} measure"),
         horizontalAlignment = if (message.role == MessageRole.USER) Alignment.End else Alignment.Start,
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+        verticalArrangement = Arrangement.spacedBy(if (message.role == MessageRole.ASSISTANT) 6.dp else 4.dp)
     ) {
-        if (message.parts.hasRenderableChatMessageContent()) {
+        if (hasVisibleContent) {
             when (message.role) {
                 MessageRole.ASSISTANT -> {
                     ChatMessageAssistantAvatar(

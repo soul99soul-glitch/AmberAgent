@@ -212,13 +212,19 @@ internal fun ChatListNormal(
     }
     if ((BuildConfig.DEBUG || BuildConfig.CHAT_PERF_TRACE)) Trace.endSection()
     val showBottomFollowAnimation = settings.displaySetting.showBottomFollowAnimation
+    val isPersonalAgentStage = LocalChatStageMode.current is ChatStageMode.PersonalAgent
     val latestMessage = conversation.messageNodes.lastOrNull()?.currentMessage
     val postSendState = chatTimelinePlan.postSendState
     val timelineLoading = chatTimelinePlan.timelineLoading
     val timelineBottomPadding = TimelineBottomSafetyPadding +
-    if (postSendState.waitingForAssistantContent) PostSendWaitingBottomReserve else 0.dp
+        if (!isPersonalAgentStage && postSendState.waitingForAssistantContent) PostSendWaitingBottomReserve else 0.dp
+    // When an empty assistant node has been inserted (assistantMessageIndex != null) while
+    // waitingForAssistantContent is still true, PostSendWaitingAssistant is omitted from the
+    // plan; hand off seamlessly to TimelineTail so the working indicator never disappears or jumps.
+    val tailIndicatorLoading = timelineLoading ||
+        (loading && postSendState.waitingForAssistantContent && postSendState.assistantMessageIndex != null)
     val tailPresentation = rememberTimelineTailPresentation(
-        conversation.id, latestMessage?.id, timelineLoading, showBottomFollowAnimation,
+        conversation.id, latestMessage?.id, tailIndicatorLoading, showBottomFollowAnimation,
     )
     val sendStage = LocalChatSendStage.current
     ChatTimelineScrollEffects(

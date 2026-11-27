@@ -23,6 +23,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.amber.ai.core.MessageRole
 import app.amber.ai.ui.UIMessage
@@ -36,6 +37,7 @@ import app.amber.core.service.ConversationTimelineLoadState
 import app.amber.core.service.PendingUserMessage
 import app.amber.feature.ui.components.message.ChatMessage
 import app.amber.feature.ui.components.message.ChatMessageVirtualItemContent
+import app.amber.feature.ui.components.message.hasVisibleChatMessageContent
 import app.amber.feature.ui.components.ui.ListSelectableItem
 import app.amber.feature.ui.utils.AmberTraceSection
 import app.amber.feature.ui.utils.ChatPerfNodeProbes
@@ -51,6 +53,34 @@ import app.amber.feature.ui.pages.proactive.TimelineProactiveCardItem
 // gap between the input field and where the bubble lands (above the bottom
 // padding + tail reserve).
 internal val SendEntranceSlideDistance = 84.dp
+internal val PersonalAgentAssistantToUserSpacing = 20.dp
+internal val PersonalAgentUserToAssistantSpacing = 16.dp
+
+/**
+ * Resolves the vertical spacing below a timeline message entry.
+ *
+ * In Personal Agent mode, speaker/turn transitions breathe slightly wider than
+ * intra-turn spacing (Assistant -> next User = 20dp; User -> next Assistant or
+ * post-send waiting indicator = 16dp). When a streaming segmented assistant node
+ * has not yet committed any visible block, its outer spacing collapses to 0dp so
+ * it cannot push the waiting indicator / persona header downward.
+ */
+internal fun resolveTimelineMessageBottomSpacing(
+    isPersonalAgent: Boolean,
+    currentRole: MessageRole,
+    nextRole: MessageRole?,
+    hasVisibleContent: Boolean = true,
+): Dp {
+    if (!hasVisibleContent) return 0.dp
+    if (!isPersonalAgent) return TimelineItemSpacing
+    return when {
+        currentRole == MessageRole.ASSISTANT && nextRole == MessageRole.USER ->
+            PersonalAgentAssistantToUserSpacing
+        currentRole == MessageRole.USER && (nextRole == MessageRole.ASSISTANT || nextRole == null) ->
+            PersonalAgentUserToAssistantSpacing
+        else -> TimelineItemSpacing
+    }
+}
 
 internal fun ChatTimelineEntry.lazyItemKey(
     conversationId: Uuid,
@@ -165,6 +195,24 @@ internal fun LazyListScope.chatTimelineItems(
                 val node = entry.node
                 val isLastMessage = index == conversation.messageNodes.lastIndex
                 val isLoadingMessage = timelineLoading && isLastMessage
+                val isPersonalAgent = LocalChatStageMode.current is ChatStageMode.PersonalAgent
+                val nextMessageRole = conversation.messageNodes.getOrNull(index + 1)?.currentMessage?.role
+                val hasVisibleMessageContent = if (isLoadingMessage && node.currentMessage.role == MessageRole.ASSISTANT) {
+                    node.currentMessage.parts.hasVisibleChatMessageContent(
+                        role = node.currentMessage.role,
+                        loading = true,
+                        replyDeliveryMode = settings.displaySetting.replyDeliveryMode,
+                        regexes = chatRegexes,
+                    )
+                } else {
+                    true
+                }
+                val itemBottomSpacing = resolveTimelineMessageBottomSpacing(
+                    isPersonalAgent = isPersonalAgent,
+                    currentRole = node.currentMessage.role,
+                    nextRole = nextMessageRole,
+                    hasVisibleContent = hasVisibleMessageContent,
+                )
                 val isPreCompacted = compaction.visualCompactedTimelineEndIndex?.let { index <= it } == true
                 // iMessage-style send entrance: the just-sent user
                 // bubble springs up from the input bar's direction.
@@ -211,7 +259,7 @@ internal fun LazyListScope.chatTimelineItems(
                                 Modifier
                             }
                         )
-                        .padding(bottom = TimelineItemSpacing)
+                        .padding(bottom = itemBottomSpacing)
                 ) {
                     TimelineCompactMarkers(
                         timelineEndIndex = index - 1,
@@ -311,11 +359,18 @@ internal fun LazyListScope.chatTimelineItems(
                 // The reading-first slice (virtualIndex == 0) is
                 // emitted last and shows the compact markers /
                 // selection checkbox at visual top.
+                val isPersonalAgent = LocalChatStageMode.current is ChatStageMode.PersonalAgent
+                val nextMessageRole = conversation.messageNodes.getOrNull(index + 1)?.currentMessage?.role
                 val sliceBelowEntry = chatTimelinePlan.entries.getOrNull(planIndex - 1)
                 val sliceBelow = (sliceBelowEntry as? ChatTimelineEntry.VirtualMessage)
                     ?.takeIf { it.messageIndex == index }
                 val bottomPadding = when {
-                    sliceBelow == null -> TimelineItemSpacing
+                    sliceBelow == null -> resolveTimelineMessageBottomSpacing(
+                        isPersonalAgent = isPersonalAgent,
+                        currentRole = node.currentMessage.role,
+                        nextRole = nextMessageRole,
+                        hasVisibleContent = true,
+                    )
                     sliceBelow.item.isAdjacentMarkdownChild(virtualItem) -> 0.dp
                     else -> TimelineMessageInnerSpacing
                 }
@@ -476,6 +531,9 @@ internal fun LazyListScope.chatTimelineItems(
                     lastMessage = lastMessage,
                     hasResolvedModel = lastMessageHasResolvedModel,
                     showModelName = settings.displaySetting.showModelName,
+                    loading = timelineLoading,
+                    replyDeliveryMode = settings.displaySetting.replyDeliveryMode,
+                    regexes = chatRegexes,
                 )
                 val tailAgentHeader = resolveWaitingIndicatorAgentName(
                     isPersonalAgent = LocalChatStageMode.current is ChatStageMode.PersonalAgent,

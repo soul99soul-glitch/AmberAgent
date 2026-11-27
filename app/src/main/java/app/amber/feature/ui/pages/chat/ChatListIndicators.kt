@@ -12,8 +12,6 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
@@ -66,7 +64,9 @@ import app.amber.ai.ui.UIMessage
 import app.amber.core.context.CompactLifecycleState
 import app.amber.core.context.CompactSummaryPayloads
 import app.amber.core.context.ConversationCompact
-import app.amber.feature.ui.components.message.hasRenderableChatMessageContent
+import app.amber.core.model.AssistantRegex
+import app.amber.core.settings.ReplyDeliveryMode
+import app.amber.feature.ui.components.message.hasVisibleChatMessageContent
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.theme.AmberTokens
 import app.amber.feature.ui.theme.LocalAmberTokens
@@ -277,20 +277,30 @@ internal data class InlineStatusShimmerRange(
 )
 
 /**
- * Resolves the muted secondary ink and high-luminance sweeping glint for the
- * Personal Agent single-line status indicator, keeping status text visibly
- * softer than body copy ([AmberTokens.ink]) and ensuring clear shimmer contrast
- * across both light paper and dark graphite themes.
+ * Resolves the muted secondary ink and theme-accented sweeping glint for the
+ * Personal Agent single-line status indicator, matching iOS `ChatTaskProgressTextShimmer`
+ * (`clear -> accentColor.opacity(0.55) -> white.opacity(0.82) -> accentColor.opacity(0.55) -> clear`):
+ * base text stays softer than body copy ([AmberTokens.ink3]), shimmer shoulders pick up the
+ * active theme [accentColor], and the peak lifts into a soft accent-tinted highlight across
+ * both light paper and dark graphite themes.
  */
-internal fun resolveInlineStatusShimmerColors(tokens: AmberTokens): InlineStatusShimmerColors {
+internal fun resolveInlineStatusShimmerColors(
+    tokens: AmberTokens,
+    accentColor: Color = tokens.accent,
+): InlineStatusShimmerColors {
     val baseInk = tokens.ink3
-    val peakInk = if (tokens.isDark) {
-        lerp(tokens.ink, Color.White, 0.65f)
+    val edgeInk = if (tokens.isDark) {
+        val liftedAccent = lerp(accentColor, Color.White, 0.24f)
+        lerp(baseInk, liftedAccent, 0.65f)
     } else {
-        val paperWhite = lerp(tokens.bg, Color.White, 0.65f)
-        lerp(baseInk, paperWhite, 0.78f)
+        lerp(baseInk, accentColor, 0.62f)
     }
-    val edgeInk = lerp(baseInk, peakInk, 0.45f)
+    val peakInk = if (tokens.isDark) {
+        lerp(accentColor, Color.White, 0.76f)
+    } else {
+        val paperWhite = lerp(tokens.bg, Color.White, 0.75f)
+        lerp(accentColor, paperWhite, 0.74f)
+    }
     return InlineStatusShimmerColors(
         baseInk = baseInk,
         edgeInk = edgeInk,
@@ -322,16 +332,25 @@ internal fun computeInlineStatusShimmerRange(
 /**
  * Mirrors `ChatMessage` + `ChatMessageAssistantAvatar`'s header visibility guard so
  * the waiting/tail indicator shows the persona name before the assistant header
- * exists and yields immediately once the assistant message renders its own name.
+ * exists and yields immediately once the assistant message actually renders visible
+ * content (committed segmented block, tool/thinking card, or live text).
  */
 internal fun hasRenderedAssistantMessageHeader(
     lastMessage: UIMessage?,
     hasResolvedModel: Boolean,
     showModelName: Boolean,
+    loading: Boolean = false,
+    replyDeliveryMode: ReplyDeliveryMode = ReplyDeliveryMode.LIVE_STREAMING,
+    regexes: List<AssistantRegex> = emptyList(),
 ): Boolean {
     if (!showModelName || !hasResolvedModel || lastMessage == null) return false
     return lastMessage.role == MessageRole.ASSISTANT &&
-        lastMessage.parts.hasRenderableChatMessageContent()
+        lastMessage.parts.hasVisibleChatMessageContent(
+            role = lastMessage.role,
+            loading = loading,
+            replyDeliveryMode = replyDeliveryMode,
+            regexes = regexes,
+        )
 }
 
 internal fun resolveWaitingIndicatorAgentName(
@@ -343,6 +362,8 @@ internal fun resolveWaitingIndicatorAgentName(
     if (!isPersonalAgent || !showModelName || hasRenderedAssistantHeader) return null
     return agentDisplayName?.trim()?.takeIf { it.isNotEmpty() }
 }
+
+internal val PersonalAgentHeaderToBodySpacing = 6.dp
 
 @Composable
 internal fun AgentWorkingIndicator(
@@ -361,7 +382,9 @@ internal fun AgentWorkingIndicator(
     val tokens = LocalAmberTokens.current
     val amberType = LocalAmberType.current
     val chatTheme = LocalChatTheme.current
-    val shimmerColors = remember(tokens) { resolveInlineStatusShimmerColors(tokens) }
+    val shimmerColors = remember(tokens, chatTheme.accent) {
+        resolveInlineStatusShimmerColors(tokens, chatTheme.accent)
+    }
     val shimmerTransition = rememberInfiniteTransition(label = "inline_status_shimmer")
     val shimmerProgress by shimmerTransition.animateFloat(
         initialValue = 0f,
@@ -375,10 +398,11 @@ internal fun AgentWorkingIndicator(
     val density = LocalDensity.current
     val fallbackTextWidthPx = with(density) { 112.dp.toPx() }
     val minBandWidthPx = with(density) { 36.dp.toPx() }
+    var lastMeasuredTextWidthPx by remember { mutableFloatStateOf(fallbackTextWidthPx) }
 
     Column(
         modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(PersonalAgentHeaderToBodySpacing),
     ) {
         if (headerLabel != null) {
             Text(
@@ -392,25 +416,29 @@ internal fun AgentWorkingIndicator(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 30.dp),
+                .height(30.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            ChatTaskWaveDots(tint = tokens.accent)
+            ChatTaskWaveDots(tint = chatTheme.accent)
             AnimatedContent(
                 targetState = statusText,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(22.dp),
+                contentAlignment = Alignment.CenterStart,
                 transitionSpec = {
-                    val enter = fadeIn(tween(180, easing = FastOutSlowInEasing)) +
-                        slideInVertically(tween(200, easing = FastOutSlowInEasing)) { it / 3 }
-                    val exit = fadeOut(tween(120, easing = FastOutSlowInEasing)) +
-                        slideOutVertically(tween(140, easing = FastOutSlowInEasing)) { -it / 3 }
-                    (enter togetherWith exit).using(SizeTransform(clip = true))
+                    (
+                        fadeIn(tween(180, easing = FastOutSlowInEasing)) togetherWith
+                            fadeOut(tween(140, easing = FastOutSlowInEasing))
+                    ).using(SizeTransform(clip = false))
                 },
                 label = "inline_working_status",
             ) { line ->
-                var measuredTextWidthPx by remember(line) { mutableFloatStateOf(0f) }
-                val effectiveWidthPx = if (measuredTextWidthPx > 0f) measuredTextWidthPx else fallbackTextWidthPx
+                var measuredTextWidthPx by remember(line) {
+                    mutableFloatStateOf(lastMeasuredTextWidthPx)
+                }
+                val effectiveWidthPx = measuredTextWidthPx.coerceAtLeast(1f)
                 val shimmerRange = computeInlineStatusShimmerRange(
                     textWidthPx = effectiveWidthPx,
                     minBandWidthPx = minBandWidthPx,
@@ -419,11 +447,11 @@ internal fun AgentWorkingIndicator(
                 val textBrush = Brush.linearGradient(
                     colorStops = arrayOf(
                         0.00f to shimmerColors.baseInk,
-                        0.22f to shimmerColors.baseInk,
-                        0.38f to shimmerColors.edgeInk,
+                        0.18f to shimmerColors.baseInk,
+                        0.35f to shimmerColors.edgeInk,
                         0.50f to shimmerColors.peakInk,
-                        0.62f to shimmerColors.edgeInk,
-                        0.78f to shimmerColors.baseInk,
+                        0.65f to shimmerColors.edgeInk,
+                        0.82f to shimmerColors.baseInk,
                         1.00f to shimmerColors.baseInk,
                     ),
                     start = Offset(shimmerRange.startX, 0f),
@@ -446,6 +474,7 @@ internal fun AgentWorkingIndicator(
                             if (width != measuredTextWidthPx) {
                                 measuredTextWidthPx = width
                             }
+                            lastMeasuredTextWidthPx = width
                         }
                     },
                 )

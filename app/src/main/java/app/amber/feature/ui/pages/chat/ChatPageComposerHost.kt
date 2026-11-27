@@ -1,5 +1,12 @@
 package app.amber.feature.ui.pages.chat
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -281,12 +288,38 @@ internal fun ChatPageComposerHost(
                 },
             )
         }
-        if (isPersonalAgentStage && duetSuggestions.isNotEmpty()) {
-            PersonalAgentSuggestionStrip(
-                suggestions = duetSuggestions,
-                onClickSuggestion = onFillSuggestion,
-                onLongClickSuggestion = { onSendSuggestion(it) },
-            )
+        var lastNonEmptyDuetSuggestions by remember(conversation.id) {
+            mutableStateOf(duetSuggestions)
+        }
+        if (duetSuggestions.isNotEmpty()) {
+            lastNonEmptyDuetSuggestions = duetSuggestions
+        }
+        val renderedDuetSuggestions = if (duetSuggestions.isNotEmpty()) {
+            duetSuggestions
+        } else {
+            lastNonEmptyDuetSuggestions
+        }
+        AnimatedVisibility(
+            visible = isPersonalAgentStage && duetSuggestions.isNotEmpty(),
+            enter = fadeIn(tween(durationMillis = 240, easing = FastOutSlowInEasing)) +
+                expandVertically(
+                    animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+                    expandFrom = Alignment.Bottom,
+                ),
+            exit = fadeOut(tween(durationMillis = 140, easing = FastOutSlowInEasing)) +
+                shrinkVertically(
+                    animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing),
+                    shrinkTowards = Alignment.Bottom,
+                ),
+            label = "personal_agent_suggestion_strip",
+        ) {
+            if (renderedDuetSuggestions.isNotEmpty()) {
+                PersonalAgentSuggestionStrip(
+                    suggestions = renderedDuetSuggestions,
+                    onClickSuggestion = onFillSuggestion,
+                    onLongClickSuggestion = { onSendSuggestion(it) },
+                )
+            }
         }
         if (visibleConfigurationIssue != null &&
             (visibleConfigurationIssue != ChatConfigurationIssue.MissingModel || onOpenModelPicker == null)

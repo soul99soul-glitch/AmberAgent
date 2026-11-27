@@ -37,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.layout.ContentScale
@@ -385,48 +386,91 @@ internal fun MessagePartsBlock(
                                                 null
                                             }
                                         val effectiveStreaming = isStreamingText && !isSegmentedDelivery
+                                        val isPersonalAgentStage =
+                                            app.amber.feature.ui.pages.chat.LocalChatStageMode.current is
+                                                app.amber.feature.ui.pages.chat.ChatStageMode.PersonalAgent
                                         if (settings.displaySetting.showAssistantBubble) {
                                             val amberTokens = LocalAmberTokens.current
                                             val themeRadius = themeBubbleRadius()
                                             val themeBorderWidth = themeBubbleBorderWidth()
                                             val assistantBubbleShape = RoundedCornerShape(themeRadius ?: 18.dp)
-                                            Surface(
-                                                modifier = Modifier
-                                                    .chatBubbleWidth(0.90f)
-                                                    .assistantBubbleEntrance(animate = appearedDuringLiveTurn),
-                                                shape = assistantBubbleShape,
-                                                color = amberTokens.surface,
-                                                contentColor = amberTokens.ink,
-                                                tonalElevation = 0.dp,
-                                                shadowElevation = 0.dp,
-                                                border = if (themeBorderWidth == null) {
-                                                    BorderStroke(0.5.dp, amberTokens.line)
-                                                } else {
-                                                    themeBorderWidth.takeIf { it > 0.dp }
-                                                        ?.let { BorderStroke(it, amberTokens.line) }
-                                                },
-                                            ) {
-                                                Column(modifier = Modifier.padding(horizontal = 15.dp, vertical = 12.dp)) {
-                                                    AssistantMarkdownBlockOrWidgets(
-                                                        content = visibleAssistantText,
-                                                        streaming = effectiveStreaming,
-                                                        deferStreamingParse = deferStreamingParse && effectiveStreaming,
-                                                        streamingMarkdownContent = streamingMarkdownContent,
-                                                        onClickCitation = handleClickCitation,
-                                                        onGenerativeWidgetAction = onGenerativeWidgetAction,
-                                                        onStreamingVisibleFrame = if (effectiveStreaming) {
-                                                            onStreamingVisibleFrame
-                                                        } else {
-                                                            null
-                                                        },
-                                                        onStreamingVisualActiveChange = if (
-                                                            effectiveStreaming || onStreamingVisibleFrame != null
-                                                        ) {
-                                                            onStreamingVisualActiveChange
-                                                        } else {
-                                                            null
-                                                        },
-                                                    )
+                                            val bubbleBorder = if (themeBorderWidth == null) {
+                                                BorderStroke(0.5.dp, amberTokens.line)
+                                            } else {
+                                                themeBorderWidth.takeIf { it > 0.dp }
+                                                    ?.let { BorderStroke(it, amberTokens.line) }
+                                            }
+                                            if (isPersonalAgentStage && !effectiveStreaming) {
+                                                val bubbleSegments = remember(visibleAssistantText) {
+                                                    splitConversationalAssistantBubbles(visibleAssistantText)
+                                                }
+                                                Column(
+                                                    verticalArrangement = Arrangement.spacedBy(7.dp),
+                                                    horizontalAlignment = Alignment.Start,
+                                                ) {
+                                                    bubbleSegments.fastForEachIndexed { bubbleIndex, segmentText ->
+                                                        key(bubbleIndex) {
+                                                            Surface(
+                                                                modifier = Modifier
+                                                                    .chatBubbleWidth(0.90f)
+                                                                    .assistantBubbleEntrance(animate = appearedDuringLiveTurn),
+                                                                shape = assistantBubbleShape,
+                                                                color = amberTokens.surface,
+                                                                contentColor = amberTokens.ink,
+                                                                tonalElevation = 0.dp,
+                                                                shadowElevation = 0.dp,
+                                                                border = bubbleBorder,
+                                                            ) {
+                                                                Column(modifier = Modifier.padding(horizontal = 15.dp, vertical = 12.dp)) {
+                                                                    AssistantMarkdownBlockOrWidgets(
+                                                                        content = segmentText,
+                                                                        streaming = false,
+                                                                        deferStreamingParse = false,
+                                                                        streamingMarkdownContent = null,
+                                                                        onClickCitation = handleClickCitation,
+                                                                        onGenerativeWidgetAction = onGenerativeWidgetAction,
+                                                                        onStreamingVisibleFrame = null,
+                                                                        onStreamingVisualActiveChange = null,
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            } else {
+                                                Surface(
+                                                    modifier = Modifier
+                                                        .chatBubbleWidth(0.90f)
+                                                        .assistantBubbleEntrance(animate = appearedDuringLiveTurn),
+                                                    shape = assistantBubbleShape,
+                                                    color = amberTokens.surface,
+                                                    contentColor = amberTokens.ink,
+                                                    tonalElevation = 0.dp,
+                                                    shadowElevation = 0.dp,
+                                                    border = bubbleBorder,
+                                                ) {
+                                                    Column(modifier = Modifier.padding(horizontal = 15.dp, vertical = 12.dp)) {
+                                                        AssistantMarkdownBlockOrWidgets(
+                                                            content = visibleAssistantText,
+                                                            streaming = effectiveStreaming,
+                                                            deferStreamingParse = deferStreamingParse && effectiveStreaming,
+                                                            streamingMarkdownContent = streamingMarkdownContent,
+                                                            onClickCitation = handleClickCitation,
+                                                            onGenerativeWidgetAction = onGenerativeWidgetAction,
+                                                            onStreamingVisibleFrame = if (effectiveStreaming) {
+                                                                onStreamingVisibleFrame
+                                                            } else {
+                                                                null
+                                                            },
+                                                            onStreamingVisualActiveChange = if (
+                                                                effectiveStreaming || onStreamingVisibleFrame != null
+                                                            ) {
+                                                                onStreamingVisualActiveChange
+                                                            } else {
+                                                                null
+                                                            },
+                                                        )
+                                                    }
                                                 }
                                             }
                                         } else {
@@ -725,8 +769,9 @@ private fun UIMessagePart.Tool.stableStepKey(): String =
     }
 
 /**
- * Smooth whole-bubble fade-in + subtle upward glide when a newly generated assistant bubble
- * appears (aligned with iOS/HarmonyOS). Historical messages skip animation (`animate == false`).
+ * Smooth whole-bubble fade-in + subtle upward glide and gentle TopStart scale settle when a
+ * newly generated assistant bubble appears (aligned with iOS/HarmonyOS). Historical messages
+ * skip animation (`animate == false`).
  */
 internal fun Modifier.assistantBubbleEntrance(animate: Boolean): Modifier = composed {
     val progress = remember { Animatable(if (animate) 0f else 1f) }
@@ -734,15 +779,60 @@ internal fun Modifier.assistantBubbleEntrance(animate: Boolean): Modifier = comp
         if (animate && progress.value < 1f) {
             progress.animateTo(
                 targetValue = 1f,
-                animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing),
+                animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing),
             )
         }
     }
     this.graphicsLayer {
         val p = progress.value
         alpha = p
-        translationY = 6.dp.toPx() * (1f - p)
+        translationY = 7.dp.toPx() * (1f - p)
+        val scale = 0.985f + 0.015f * p
+        scaleX = scale
+        scaleY = scale
+        transformOrigin = TransformOrigin(0f, 0f)
     }
+}
+
+private val ConversationalParagraphSplitRegex = Regex("""\r?\n\s*\r?\n+""")
+private val MarkdownHeadingLineRegex = Regex("""^#{1,6}\s+""")
+private val MarkdownListLineRegex = Regex("""^(?:[-*+•]|\d+[.)])\s+""")
+private val MarkdownRuleLineRegex = Regex("""^(?:-{3,}|\*{3,}|_{3,})$""")
+private val MarkdownCodeFenceRegex = Regex("""(?m)^\s*(?:```|~~~)""")
+private val HtmlOrWidgetTagRegex = Regex("""</?[a-zA-Z][\w-]*[\s>]""")
+
+/**
+ * Splits short, natural multi-paragraph conversational assistant replies (2–4 blank-line-separated
+ * prose paragraphs) into separate chat bubbles when assistant bubbles are enabled.
+ *
+ * Strictly conservative: any structured Markdown (code fences, headings, lists, blockquotes,
+ * tables, horizontal rules, math blocks, multi-line paragraphs, HTML/widget tags) or long-form
+ * prose stays in a single unified bubble.
+ */
+internal fun splitConversationalAssistantBubbles(text: String): List<String> {
+    val trimmed = text.trim()
+    if (trimmed.isEmpty()) return emptyList()
+    if (trimmed.length > 520) return listOf(trimmed)
+    if (MarkdownCodeFenceRegex.containsMatchIn(trimmed) || trimmed.contains("$$")) {
+        return listOf(trimmed)
+    }
+    val paragraphs = trimmed
+        .split(ConversationalParagraphSplitRegex)
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+    if (paragraphs.size !in 2..4) return listOf(trimmed)
+    val isNaturalConversational = paragraphs.all { paragraph ->
+        paragraph.length <= 220 &&
+            !paragraph.contains('\n') &&
+            !paragraph.contains('\r') &&
+            !MarkdownHeadingLineRegex.containsMatchIn(paragraph) &&
+            !MarkdownListLineRegex.containsMatchIn(paragraph) &&
+            !MarkdownRuleLineRegex.matches(paragraph) &&
+            !paragraph.startsWith(">") &&
+            !(paragraph.startsWith("|") || paragraph.endsWith("|") || paragraph.contains(" | ")) &&
+            !HtmlOrWidgetTagRegex.containsMatchIn(paragraph)
+    }
+    return if (isNaturalConversational) paragraphs else listOf(trimmed)
 }
 
 /**
