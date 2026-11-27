@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
@@ -26,6 +27,10 @@ import app.amber.core.files.FilesManager
 import app.amber.core.model.Conversation
 import app.amber.core.repository.ConversationRepository
 import app.amber.core.settings.Settings
+import app.amber.feature.macgateway.CloudDialogueSubmission
+import app.amber.feature.macgateway.CloudDialogueUiState
+import app.amber.feature.macgateway.CloudSubmissionKind
+import app.amber.feature.macgateway.CloudTaskSession
 import app.amber.feature.macgateway.MacGatewayRepository
 import app.amber.feature.runtime.OutcomeUnknownPrompt
 import app.amber.feature.runtime.SandboxActivityUiState
@@ -38,9 +43,83 @@ import app.amber.feature.ui.context.LocalToaster
 import app.amber.feature.ui.hooks.ChatInputState
 import app.amber.feature.webmount.primitives.WebMountSessionOwner
 import com.dokar.sonner.ToastType
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import kotlin.uuid.Uuid
+
+/**
+ * Immutable conversation-scoped projection of cloud/local async task state consumed by the
+ * composer dock. Isolates the composer from `cursor` ticks, unrelated conversation updates,
+ * and gateway reachability refreshes (R6-4).
+ */
+@Immutable
+internal data class ChatComposerCloudStateSlice(
+    val conversationId: String,
+    val cloudActive: Boolean,
+    val selectedFollowupWorkItemId: String?,
+    val activeTasks: List<CloudTaskSession>,
+    val outcomeUnknownTasks: List<CloudTaskSession>,
+    val recentInputs: List<CloudDialogueSubmission>,
+) {
+    fun toDockUiState(): CloudDialogueUiState = CloudDialogueUiState(
+        enabled = cloudActive,
+        activeConversationId = conversationId,
+        cursor = 0L,
+        selectedFollowupWorkItemId = selectedFollowupWorkItemId,
+        tasks = (activeTasks + outcomeUnknownTasks).distinctBy { it.workItemId },
+        submissions = recentInputs,
+        lastError = null,
+    )
+}
+
+internal fun projectChatComposerCloudState(
+    conversationId: String,
+    cloudActive: Boolean,
+    cloudDialogueState: CloudDialogueUiState,
+    localAsyncState: CloudDialogueUiState,
+): ChatComposerCloudStateSlice {
+    val source = if (cloudActive) cloudDialogueState else localAsyncState
+    val activeTasks = source.activeTasksForConversation(conversationId)
+    val outcomeUnknownTasks = source.outcomeUnknownTasksForConversation(conversationId)
+    val recentInputs = source.submissionsForConversation(conversationId)
+        .filter {
+            it.kind == CloudSubmissionKind.FOLLOWUP ||
+                it.stopTooLate ||
+                (cloudActive && it.kind == CloudSubmissionKind.MESSAGE)
+        }
+        .take(3)
+    val resolvedFollowupWorkItemId = source.resolvedFollowupTarget(conversationId)?.workItemId
+    return ChatComposerCloudStateSlice(
+        conversationId = conversationId,
+        cloudActive = cloudActive,
+        selectedFollowupWorkItemId = resolvedFollowupWorkItemId,
+        activeTasks = activeTasks,
+        outcomeUnknownTasks = outcomeUnknownTasks,
+        recentInputs = recentInputs,
+    )
+}
+
+internal fun observeChatComposerCloudStateSlice(
+    conversationId: String,
+    cloudActiveFlow: Flow<Boolean>,
+    cloudDialogueStateFlow: Flow<CloudDialogueUiState>,
+    localAsyncStateFlow: Flow<CloudDialogueUiState>,
+): Flow<ChatComposerCloudStateSlice> = combine(
+    cloudActiveFlow.distinctUntilChanged(),
+    cloudDialogueStateFlow,
+    localAsyncStateFlow,
+) { cloudActive, cloudDialogueState, localAsyncState ->
+    projectChatComposerCloudState(
+        conversationId = conversationId,
+        cloudActive = cloudActive,
+        cloudDialogueState = cloudDialogueState,
+        localAsyncState = localAsyncState,
+    )
+}.distinctUntilChanged()
 
 @Composable
 internal fun ChatPageComposerHost(
@@ -79,9 +158,6 @@ internal fun ChatPageComposerHost(
     val conversationRepository: ConversationRepository = koinInject()
     val macGatewayRepository: MacGatewayRepository = koinInject()
     val localAsyncTaskCoordinator: app.amber.core.service.LocalAsyncTaskCoordinator = koinInject()
-    val gatewayState by macGatewayRepository.state.collectAsStateWithLifecycle()
-    val cloudDialogueState by macGatewayRepository.cloudDialogueState.collectAsStateWithLifecycle()
-    val localAsyncState by localAsyncTaskCoordinator.uiState.collectAsStateWithLifecycle()
     val webMountSessionOwner: WebMountSessionOwner = koinInject()
     val webMountSessions by webMountSessionOwner.sessions.collectAsStateWithLifecycle()
     val conversationWebMountSessions = webMountSessions.filter {
@@ -145,65 +221,10 @@ internal fun ChatPageComposerHost(
         ChatInput(
             submissionOwner = inputSubmissionOwner,
             aboveComposerContent = {
-                val isCloudActive = gatewayState.isCloudDialogueActive
-                CloudDialogueStatusDock(
-                    conversationId = conversation.id.toString(),
-                    cloudActive = isCloudActive,
-                    uiState = if (isCloudActive) cloudDialogueState else localAsyncState,
-                    onSelectFollowupTarget = { workItemId ->
-                        if (isCloudActive) {
-                            macGatewayRepository.selectFollowupTarget(workItemId)
-                        } else {
-                            localAsyncTaskCoordinator.selectFollowupTarget(conversation.id, workItemId)
-                        }
-                    },
-                    onStopTask = { workItemId ->
-                        scope.launch {
-                            runCatching {
-                                if (isCloudActive) {
-                                    macGatewayRepository.stopCloudWorkItem(workItemId)
-                                } else {
-                                    localAsyncTaskCoordinator.stopTask(conversation.id, workItemId)
-                                }
-                            }.onFailure { error ->
-                                toaster.show(error.message ?: "Stop failed", type = ToastType.Error)
-                            }
-                        }
-                    },
-                    onRecheckOutcomeUnknown = { workItemId ->
-                        if (isCloudActive) {
-                            scope.launch {
-                                runCatching { macGatewayRepository.recheckCloudOutcomeUnknown(workItemId) }
-                                    .onSuccess { settled ->
-                                        if (!settled) toaster.show(context.getString(app.amber.agent.R.string.mac_gateway_cloud_outcome_unknown_hint))
-                                    }
-                                    .onFailure { error ->
-                                        toaster.show(error.message ?: "Recheck failed", type = ToastType.Error)
-                                    }
-                            }
-                        }
-                    },
-                    onRetryOutcomeUnknown = { workItemId ->
-                        if (isCloudActive) {
-                            scope.launch {
-                                runCatching {
-                                    macGatewayRepository.retryCloudOutcomeUnknown(
-                                        conversationId = conversation.id.toString(),
-                                        workItemId = workItemId,
-                                    )
-                                }.onFailure { error ->
-                                    toaster.show(error.message ?: "Retry failed", type = ToastType.Error)
-                                }
-                            }
-                        }
-                    },
-                    onAbandonOutcomeUnknown = { workItemId ->
-                        if (isCloudActive) {
-                            scope.launch {
-                                macGatewayRepository.abandonCloudOutcomeUnknown(workItemId)
-                            }
-                        }
-                    },
+                ChatComposerCloudStatusDockHost(
+                    conversationId = conversation.id,
+                    macGatewayRepository = macGatewayRepository,
+                    localAsyncTaskCoordinator = localAsyncTaskCoordinator,
                 )
                 if (subAgentDockEverShown || subAgentDockHasTasks) {
                     SubAgentStatusDock(
@@ -264,4 +285,101 @@ internal fun ChatPageComposerHost(
             },
         )
     }
+}
+
+@Composable
+private fun ChatComposerCloudStatusDockHost(
+    conversationId: Uuid,
+    macGatewayRepository: MacGatewayRepository,
+    localAsyncTaskCoordinator: app.amber.core.service.LocalAsyncTaskCoordinator,
+) {
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val toaster = LocalToaster.current
+    val conversationIdString = conversationId.toString()
+    val cloudStateSliceFlow = remember(conversationIdString, macGatewayRepository, localAsyncTaskCoordinator) {
+        observeChatComposerCloudStateSlice(
+            conversationId = conversationIdString,
+            cloudActiveFlow = macGatewayRepository.state.map { it.isCloudDialogueActive },
+            cloudDialogueStateFlow = macGatewayRepository.cloudDialogueState,
+            localAsyncStateFlow = localAsyncTaskCoordinator.uiState,
+        )
+    }
+    val initialCloudStateSlice = remember(conversationIdString, macGatewayRepository, localAsyncTaskCoordinator) {
+        projectChatComposerCloudState(
+            conversationId = conversationIdString,
+            cloudActive = macGatewayRepository.state.value.isCloudDialogueActive,
+            cloudDialogueState = macGatewayRepository.cloudDialogueState.value,
+            localAsyncState = localAsyncTaskCoordinator.uiState.value,
+        )
+    }
+    val cloudStateSlice by cloudStateSliceFlow.collectAsStateWithLifecycle(
+        initialValue = initialCloudStateSlice,
+    )
+    val isCloudActive = cloudStateSlice.cloudActive
+    val dockUiState = remember(cloudStateSlice) { cloudStateSlice.toDockUiState() }
+
+    CloudDialogueStatusDock(
+        conversationId = conversationIdString,
+        cloudActive = isCloudActive,
+        uiState = dockUiState,
+        onSelectFollowupTarget = { workItemId ->
+            if (isCloudActive) {
+                macGatewayRepository.selectFollowupTarget(workItemId)
+            } else {
+                localAsyncTaskCoordinator.selectFollowupTarget(conversationId, workItemId)
+            }
+        },
+        onStopTask = { workItemId ->
+            scope.launch {
+                runCatching {
+                    if (isCloudActive) {
+                        macGatewayRepository.stopCloudWorkItem(workItemId)
+                    } else {
+                        localAsyncTaskCoordinator.stopTask(conversationId, workItemId)
+                    }
+                }.onFailure { error ->
+                    toaster.show(error.message ?: "Stop failed", type = ToastType.Error)
+                }
+            }
+        },
+        onRecheckOutcomeUnknown = { workItemId ->
+            if (isCloudActive) {
+                scope.launch {
+                    runCatching { macGatewayRepository.recheckCloudOutcomeUnknown(workItemId) }
+                        .onSuccess { settled ->
+                            if (!settled) {
+                                toaster.show(
+                                    context.getString(R.string.mac_gateway_cloud_outcome_unknown_hint),
+                                )
+                            }
+                        }
+                        .onFailure { error ->
+                            toaster.show(error.message ?: "Recheck failed", type = ToastType.Error)
+                        }
+                }
+            }
+        },
+        onRetryOutcomeUnknown = { workItemId ->
+            if (isCloudActive) {
+                scope.launch {
+                    runCatching {
+                        macGatewayRepository.retryCloudOutcomeUnknown(
+                            conversationId = conversationIdString,
+                            workItemId = workItemId,
+                        )
+                    }.onFailure { error ->
+                        toaster.show(error.message ?: "Retry failed", type = ToastType.Error)
+                    }
+                }
+            }
+        },
+        onAbandonOutcomeUnknown = { workItemId ->
+            if (isCloudActive) {
+                scope.launch {
+                    macGatewayRepository.abandonCloudOutcomeUnknown(workItemId)
+                }
+            }
+        },
+    )
 }
