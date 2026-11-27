@@ -2,6 +2,9 @@ package app.amber.feature.ui.theme
 
 import android.app.Application
 import android.content.Context
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.toArgb
 import androidx.room.Room
 import app.amber.agent.data.db.AppDatabase
 import app.amber.agent.data.db.dao.ThemePackageDAO
@@ -9,6 +12,7 @@ import app.amber.agent.data.db.entity.ThemePackageEntity
 import app.amber.core.settings.ChatFontFamily
 import app.amber.core.settings.DisplaySetting
 import app.amber.core.settings.Settings
+import app.amber.core.settings.themeContrast
 import app.amber.core.sync.core.SyncRestoreWriteEpoch
 import app.amber.core.sync.core.SyncRestoreWriteGate
 import app.amber.core.sync.core.SyncRestoreWriteRejectedException
@@ -95,6 +99,19 @@ class ThemePackageManagerTest {
         assertEquals(androidx.compose.ui.graphics.Color(0xFFFBF9F5), baseTokens(AmberBase.LIGHT).bg)
         assertEquals(androidx.compose.ui.graphics.Color(0xFFF3EFEA), baseTokens(AmberBase.LIGHT).surface)
         assertEquals(androidx.compose.ui.graphics.Color(0xFF14110E), baseTokens(AmberBase.DARK).bg)
+    }
+
+    @Test
+    fun `Duet keeps white on the terracotta bubble and legible labels on tinted surfaces`() {
+        val terracotta = Color(0xFFB8623A)
+        val light = buildAmberTokens(AmberBase.LIGHT, terracotta)
+        assertEquals(terracotta, light.userBg)
+        assertEquals(Color.White, light.userInk)
+        for (tokens in listOf(light, buildAmberTokens(AmberBase.DARK, terracotta))) {
+            val tint = terracotta.copy(alpha = 0.12f).compositeOver(tokens.surface)
+            assertTrue(themeContrast(tokens.accentLabel.toArgb(), tint.toArgb()) >= 4.5)
+            assertTrue(themeContrast(tokens.ink3.toArgb(), tokens.surface.toArgb()) >= 4.5)
+        }
     }
 
     @Test

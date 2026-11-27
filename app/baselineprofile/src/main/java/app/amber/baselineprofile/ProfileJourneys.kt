@@ -79,10 +79,13 @@ internal fun MacrobenchmarkScope.openExplicitSessionHome(
 ) {
     if (!directHomeLaunch) {
         waitForPersonalAgentReady(packageName)
-        if (!device.hasObject(tag(packageName, ProfileTestTags.PERSONAL_AGENT_SESSIONS))) {
-            waitForNode(tag(packageName, ProfileTestTags.PERSONAL_AGENT_MORE)).click()
-        }
-        waitForNode(tag(packageName, ProfileTestTags.PERSONAL_AGENT_SESSIONS)).click()
+        val menu = tag(packageName, ProfileTestTags.PERSONAL_AGENT_MORE)
+        waitForNode(menu).click()
+        check(device.wait(Until.gone(menu), STAGE_READY_TIMEOUT_MS)) { "Workspace sheet did not open" }
+        val sessions = tag(packageName, ProfileTestTags.PERSONAL_AGENT_SESSIONS)
+        val entry = device.findObject(sessions) ?: waitForNode(By.pkg(packageName).scrollable(true))
+            .scrollUntil(Direction.DOWN, Until.findObject(sessions))
+        checkNotNull(entry) { "All conversations entry missing from workspace sheet" }.click()
     }
     waitForNode(tag(packageName, ProfileTestTags.SESSION_HOME_SEARCH))
     waitForNode(tag(packageName, ProfileTestTags.HOME_HEADER_SETTINGS))

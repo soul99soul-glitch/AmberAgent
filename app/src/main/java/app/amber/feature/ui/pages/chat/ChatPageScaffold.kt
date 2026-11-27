@@ -493,6 +493,8 @@ internal fun ChatPageScaffold(
                     ChatPageComposerHost(
                         inputState = inputState,
                         inputSubmissionOwner = inputSubmissionOwner,
+                        conversationFlow = vm.conversation,
+                        suggestionsPaused = isCompacting || compactLifecycleState.isActive,
                         inputActions = inputActions,
                         loading = loadingJob != null,
                         setting = setting,

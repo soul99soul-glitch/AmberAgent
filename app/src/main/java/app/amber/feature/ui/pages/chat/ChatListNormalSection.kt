@@ -183,7 +183,7 @@ internal fun ChatListNormal(
     val bottomPinBufferPx = with(density) { 24.dp.toPx().roundToInt() }
     val sendTransitionSlidePx = with(density) { SendTransitionSlideDistance.roundToPx() }
     if ((BuildConfig.DEBUG || BuildConfig.CHAT_PERF_TRACE)) Trace.beginSection("Amber chatlist suggestions")
-    val actionSuggestions = if (activeGeneration) {
+    val actionSuggestions = if (activeGeneration || LocalChatStageMode.current is ChatStageMode.PersonalAgent) {
         // Suggestions are hidden for the whole generation. Avoid joining and
         // rescanning the growing assistant tail on every stream snapshot; the
         // settled branch below recomputes them when they can become visible.
@@ -494,7 +494,7 @@ internal fun ChatListNormal(
                         // bottom overlay while the input panel has its own height animation;
                         // animating both during send makes the timeline feel like it is
                         // being tugged from two places.
-                        if (visibleSuggestions.isNotEmpty() && LocalChatStageMode.current !is ChatStageMode.PersonalAgent) {
+                        if (visibleSuggestions.isNotEmpty()) {
                             ChatSuggestionsRow(
                                 modifier = Modifier.align(Alignment.BottomCenter),
                                 suggestions = visibleSuggestions,

@@ -101,7 +101,7 @@ fun PersonalAgentPage(
                 .map { state -> state.tasks.count { it.active } }
                 .distinctUntilChanged(),
             subAgentDockState.uiState
-                .map { state -> if (state.enabled) state.tasks.size else 0 }
+                .map { state -> if (state.enabled) state.tasks.count { it.status.keepsDockVisible } else 0 }
                 .distinctUntilChanged(),
         ) { cloudActiveCount, localActiveCount, subAgentCount ->
             cloudActiveCount + localActiveCount + subAgentCount

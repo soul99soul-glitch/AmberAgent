@@ -34,6 +34,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,6 +42,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -72,7 +75,7 @@ import kotlin.uuid.Uuid
  * Large bottom workspace & history drawer sheet opened by the top-left `≡` button,
  * aligned with iOS `AmberDuetWorkspaceDrawerSheet`.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
 fun PersonalAgentWorkspaceSheet(
     currentConversationId: Uuid,
@@ -116,6 +119,7 @@ fun PersonalAgentWorkspaceSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .fillMaxHeight(0.86f)
+                .semantics { testTagsAsResourceId = true }
                 .navigationBarsPadding(),
         ) {
             // Sheet Top Bar: Search | 导航与历史 | Settings (terracotta)
@@ -183,7 +187,7 @@ fun PersonalAgentWorkspaceSheet(
                     )
                     Text(
                         text = stringResource(R.string.personal_agent_menu_settings),
-                        color = tokens.accent,
+                        color = tokens.accentLabel,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
@@ -227,7 +231,7 @@ fun PersonalAgentWorkspaceSheet(
                     Surface(
                         shape = RoundedCornerShape(16.dp),
                         color = tokens.surface,
-                        border = BorderStroke(0.8.dp, tokens.line),
+                        border = BorderStroke(0.5.dp, tokens.floatingOutline),
                         tonalElevation = 0.dp,
                     ) {
                         Column(modifier = Modifier.fillMaxWidth()) {
@@ -338,7 +342,7 @@ fun PersonalAgentWorkspaceSheet(
                         ) {
                             Text(
                                 text = stringResource(R.string.personal_agent_drawer_manage_all),
-                                color = tokens.accent,
+                                color = tokens.accentLabel,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
                             )
@@ -354,7 +358,7 @@ fun PersonalAgentWorkspaceSheet(
                     Surface(
                         shape = RoundedCornerShape(16.dp),
                         color = tokens.surface,
-                        border = BorderStroke(0.8.dp, tokens.line),
+                        border = BorderStroke(0.5.dp, tokens.floatingOutline),
                         tonalElevation = 0.dp,
                     ) {
                         if (recentConversations.isEmpty()) {
@@ -413,7 +417,7 @@ fun PersonalAgentWorkspaceSheet(
                                             ) {
                                                 Text(
                                                     text = stringResource(R.string.personal_agent_drawer_current_badge),
-                                                    color = tokens.accent,
+                                                    color = tokens.accentLabel,
                                                     fontSize = 11.sp,
                                                     fontWeight = FontWeight.SemiBold,
                                                 )
@@ -450,7 +454,7 @@ private fun AgentPrimaryCard(
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = tokens.surface,
-        border = BorderStroke(0.8.dp, tokens.line),
+        border = BorderStroke(0.5.dp, tokens.floatingOutline),
         tonalElevation = 0.dp,
     ) {
         Row(
@@ -461,9 +465,7 @@ private fun AgentPrimaryCard(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Box(
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .clickable(onClick = onOpenAgentSoul),
+                modifier = Modifier.clickable(onClick = onOpenAgentSoul),
                 contentAlignment = Alignment.BottomEnd,
             ) {
                 AmberPersonaMedallion(diameter = 46.dp)
@@ -513,7 +515,7 @@ private fun AgentPrimaryCard(
                     ) {
                         Text(
                             text = stringResource(R.string.personal_agent_drawer_customize_persona),
-                            color = tokens.accent,
+                            color = tokens.accentLabel,
                             fontSize = 10.5.sp,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
@@ -630,7 +632,7 @@ private fun DrawerFeatureRow(
         Icon(
             imageVector = Lucide.ChevronRight,
             contentDescription = null,
-            tint = tokens.ink4,
+            tint = tokens.ink3,
             modifier = Modifier.size(14.dp),
         )
     }

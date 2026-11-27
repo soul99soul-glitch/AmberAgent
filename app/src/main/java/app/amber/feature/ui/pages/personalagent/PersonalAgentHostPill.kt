@@ -78,19 +78,19 @@ fun PersonalAgentHostPill(
     val pillBorder = if (isCloudSelected) {
         tokens.accent.copy(alpha = 0.36f)
     } else {
-        tokens.line
+        tokens.floatingOutline
     }
     val dotColor = if (isCloudSelected) {
         tokens.accent
     } else {
-        Color(0xFF4B8F7C)
+        tokens.ink3
     }
     val elevation = if (tokens.isDark) 0.dp else 2.dp
 
     Box(modifier = modifier) {
         Row(
             modifier = Modifier
-                .height(40.dp)
+                .height(38.dp)
                 .shadow(
                     elevation = elevation,
                     shape = CircleShape,
@@ -100,7 +100,7 @@ fun PersonalAgentHostPill(
                 )
                 .clip(CircleShape)
                 .background(pillFill)
-                .border(width = 1.dp, color = pillBorder, shape = CircleShape)
+                .border(width = 0.5.dp, color = pillBorder, shape = CircleShape)
                 .testTag("personal-agent-host-pill")
                 .combinedClickable(
                     role = Role.Button,

@@ -395,10 +395,11 @@ internal fun ChatInput(
                     label = "composerAttachmentToggleRotation",
                 )
                 val pillBorder = lerp(
-                    start = tokens.line,
+                    start = if (duetStyle) tokens.floatingOutline else tokens.line,
                     stop = chatTheme.accent.copy(alpha = 0.42f),
                     fraction = pulseFraction,
                 )
+                val duetFill = lerp(tokens.bg, tokens.surface, 0.72f)
                 val composerRowHeight = if (duetStyle) 48.dp else 44.dp
                 val sendButtonSize = if (duetStyle) 48.dp else ComposerButtonSize
                 val duetPlaceholder = if (duetStyle) {
@@ -472,8 +473,8 @@ internal fun ChatInput(
                             .weight(1f)
                             .heightIn(min = composerRowHeight)
                             .clip(pillShape)
-                            .background(if (duetStyle) tokens.surface else tokens.surface2)
-                            .border(BorderStroke(1.dp, pillBorder), pillShape)
+                            .background(if (duetStyle) duetFill else tokens.surface2)
+                            .border(BorderStroke(if (duetStyle) 0.5.dp else 1.dp, pillBorder), pillShape)
                             .padding(
                                 start = if (duetStyle) 6.dp else 18.dp,
                                 end = 16.dp,
@@ -499,7 +500,7 @@ internal fun ChatInput(
                                         contentDescription = stringResource(R.string.more_options),
                                         tint = if (attachmentsExpanded) chatTheme.accent else tokens.ink2,
                                         modifier = Modifier
-                                            .size(21.dp)
+                                            .size(19.dp)
                                             .graphicsLayer {
                                                 rotationZ = addRotation
                                             },
@@ -570,7 +571,7 @@ internal fun ChatInput(
                     val sendIsActiveFill = sendEnabled && (!sendEmpty || loading)
                     val sendFill by animateColorAsState(
                         targetValue = if (!sendIsActiveFill) {
-                            if (duetStyle) tokens.surface else tokens.surface2
+                            if (duetStyle) duetFill else tokens.surface2
                         } else {
                             tokens.accent
                         },
@@ -617,7 +618,7 @@ internal fun ChatInput(
                                 .background(sendFill)
                                 .then(
                                     if (duetStyle && !sendIsActiveFill) {
-                                        Modifier.border(BorderStroke(1.dp, tokens.line), CircleShape)
+                                        Modifier.border(BorderStroke(0.5.dp, tokens.floatingOutline), CircleShape)
                                     } else {
                                         Modifier
                                     },

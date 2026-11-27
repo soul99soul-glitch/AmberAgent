@@ -56,7 +56,7 @@ internal val PersonalAgentTopChromeHeight = 104.dp
  * Floating 3-piece Personal Agent top bar aligned with iOS & HarmonyOS Amber Duet:
  * - Soft vertical gradient fade from `bg` to transparent (zero hard divider line)
  * - Top-left 44dp circular raised Menu (`≡`) button opening the Workspace bottom sheet
- * - Centered 64dp Persona Medallion + overlapping bottom topic pill (tapping pill opens model menu)
+ * - Centered 70dp Persona Medallion + overlapping bottom topic pill (tapping pill opens model menu)
  * - Top-right 44dp circular raised Inbox button with optional terracotta badge count
  */
 @Composable
@@ -105,18 +105,17 @@ fun PersonalAgentTopChrome(
                 imageVector = Lucide.Menu,
                 contentDescription = null,
                 tint = tokens.ink,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(19.dp),
             )
         }
 
-        // Center: 64dp Persona Medallion + overlapping topic pill (-10dp overlap)
+        // Center: 70dp Persona Medallion + overlapping topic pill (-10dp overlap)
         Box(
             modifier = Modifier.align(Alignment.TopCenter),
             contentAlignment = Alignment.TopCenter,
         ) {
             Box(
                 modifier = Modifier
-                    .clip(CircleShape)
                     .testTag("chat-header-agent-soul")
                     .combinedClickable(
                         role = Role.Button,
@@ -126,7 +125,7 @@ fun PersonalAgentTopChrome(
                 contentAlignment = Alignment.Center,
             ) {
                 AmberPersonaMedallion(
-                    diameter = 64.dp,
+                    diameter = 70.dp,
                     generating = generating,
                 )
             }
@@ -137,7 +136,7 @@ fun PersonalAgentTopChrome(
                 onClick = onToggleModelMenu,
                 onLongClick = if (recapEligible) onOpenRecap else null,
                 modifier = Modifier
-                    .padding(top = 54.dp)
+                    .padding(top = 60.dp)
                     .testTag("chat-header-model-menu"),
             )
         }
@@ -157,7 +156,7 @@ fun PersonalAgentTopChrome(
                     imageVector = Lucide.Inbox,
                     contentDescription = null,
                     tint = tokens.ink,
-                    modifier = Modifier.size(20.dp),
+                    modifier = Modifier.size(19.dp),
                 )
             }
 
@@ -196,7 +195,7 @@ private fun FloatingTopCircleButton(
     content: @Composable () -> Unit,
 ) {
     val tokens = LocalAmberTokens.current
-    val elevation = if (tokens.isDark) 0.dp else 3.dp
+    val elevation = if (tokens.isDark) 0.dp else 2.dp
     Surface(
         onClick = onClick,
         modifier = modifier
@@ -212,7 +211,7 @@ private fun FloatingTopCircleButton(
         shape = CircleShape,
         color = tokens.raised,
         contentColor = tokens.ink,
-        border = BorderStroke(1.dp, tokens.line),
+        border = BorderStroke(0.5.dp, tokens.floatingOutline),
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
     ) {
@@ -231,7 +230,7 @@ private fun TopicCapsulePill(
     modifier: Modifier = Modifier,
 ) {
     val tokens = LocalAmberTokens.current
-    val elevation = if (tokens.isDark) 0.dp else 3.dp
+    val elevation = if (tokens.isDark) 0.dp else 2.dp
     val pulse = if (generating) {
         val transition = rememberInfiniteTransition(label = "topicPillPulse")
         transition.animateFloat(
@@ -249,7 +248,7 @@ private fun TopicCapsulePill(
 
     Surface(
         modifier = modifier
-            .heightIn(min = 28.dp)
+            .heightIn(min = 26.dp)
             .widthIn(max = 184.dp)
             .shadow(
                 elevation = elevation,
@@ -267,7 +266,7 @@ private fun TopicCapsulePill(
         shape = CircleShape,
         color = tokens.raised,
         contentColor = tokens.ink,
-        border = BorderStroke(1.dp, tokens.line),
+        border = BorderStroke(0.5.dp, tokens.floatingOutline),
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
     ) {

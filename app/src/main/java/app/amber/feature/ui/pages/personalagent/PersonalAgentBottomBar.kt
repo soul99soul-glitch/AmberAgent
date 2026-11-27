@@ -7,7 +7,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -80,7 +81,7 @@ fun PersonalAgentBottomBar(
             // Left: 3-segment track well
             Row(
                 modifier = Modifier
-                    .height(40.dp)
+                    .height(38.dp)
                     .shadow(
                         elevation = trackElevation,
                         shape = CircleShape,
@@ -90,7 +91,7 @@ fun PersonalAgentBottomBar(
                     )
                     .clip(CircleShape)
                     .background(tokens.surface)
-                    .border(width = 1.dp, color = tokens.line, shape = CircleShape)
+                    .border(width = 0.5.dp, color = tokens.floatingOutline, shape = CircleShape)
                     .padding(3.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -142,10 +143,11 @@ private fun ModeSegmentButton(
 ) {
     val tokens = LocalAmberTokens.current
     val activeShadow = if (selected && !tokens.isDark) 2.dp else 0.dp
+    val activeFill = if (tokens.isDark) lerp(tokens.raised, tokens.ink, 0.12f) else tokens.raised
 
     Row(
         modifier = modifier
-            .height(34.dp)
+            .height(32.dp)
             .shadow(
                 elevation = activeShadow,
                 shape = CircleShape,
@@ -154,8 +156,8 @@ private fun ModeSegmentButton(
                 spotColor = Color.Black.copy(alpha = 0.08f),
             )
             .clip(CircleShape)
-            .background(if (selected) tokens.raised else Color.Transparent)
-            .clickable(role = Role.Tab, onClick = onClick)
+            .background(if (selected) activeFill else Color.Transparent)
+            .selectable(selected = selected, role = Role.Tab, onClick = onClick)
             .padding(horizontal = if (badgeCount > 0) 12.dp else 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),

@@ -142,6 +142,8 @@ internal fun observeChatComposerCloudStateSlice(
 internal fun ChatPageComposerHost(
     inputState: ChatInputState,
     inputSubmissionOwner: ChatInputSubmissionOwner,
+    conversationFlow: Flow<Conversation>,
+    suggestionsPaused: Boolean,
     inputActions: ChatPageInputActions,
     loading: Boolean,
     setting: Settings,
@@ -209,15 +211,22 @@ internal fun ChatPageComposerHost(
     val defaultBoardSuggestion = stringResource(R.string.amber_redesign_suggestion_board)
     val defaultReplySuggestion = stringResource(R.string.amber_redesign_suggestion_reply)
     val defaultConceptSuggestion = stringResource(R.string.amber_redesign_suggestion_concept)
-    val duetSuggestions = if (isPersonalAgentStage && !loading && !imeVisible && !inputHasContent && !inputState.isEditing()) {
+    val visibleConfigurationIssue = configurationIssue?.takeIf {
+        !loading && (inputState.isEditing() || !inputActions.canSendWithoutChatModel(inputState.getContents()))
+    }
+    val duetSuggestions = if (isPersonalAgentStage && visibleConfigurationIssue == null &&
+        !loading && !suggestionsPaused && !imeVisible && !inputHasContent && !inputState.isEditing()
+    ) {
         if (conversation.messageNodes.isEmpty()) {
             startSuggestions.ifEmpty {
                 listOf(defaultBoardSuggestion, defaultReplySuggestion, defaultConceptSuggestion)
             }
         } else {
-            remember(conversation.messageNodes, conversation.chatSuggestions) {
-                conversation.actionSuggestionTexts()
+            // The input snapshot omits chatSuggestions and same-ID streaming edits.
+            val suggestionsFlow = remember(conversationFlow) {
+                conversationFlow.map(Conversation::actionSuggestionTexts).distinctUntilChanged()
             }
+            suggestionsFlow.collectAsStateWithLifecycle(initialValue = emptyList()).value
         }
     } else {
         emptyList()
@@ -263,10 +272,9 @@ internal fun ChatPageComposerHost(
                 onLongClickSuggestion = { onSendSuggestion(it) },
             )
         }
-        if (!loading && configurationIssue != null &&
-            (inputState.isEditing() || !inputActions.canSendWithoutChatModel(inputState.getContents()))) {
+        if (visibleConfigurationIssue != null) {
             ChatConfigurationHint(
-                issue = configurationIssue,
+                issue = visibleConfigurationIssue,
                 compactPill = isPersonalAgentStage,
                 onConfigure = onConfigureModel,
             )
@@ -315,7 +323,8 @@ internal fun ChatPageComposerHost(
                 onUpdateSettings(setting.copy(enableWebSearch = !enableWebSearch))
             },
             sandboxActivity = sandboxActivity?.takeUnless {
-                it.runtime == "WebMount" && conversationWebMountSessions.isNotEmpty()
+                (isPersonalAgentStage && it.toolName == "agent_idle") ||
+                    (it.runtime == "WebMount" && conversationWebMountSessions.isNotEmpty())
             },
             onOpenSandbox = onOpenSandbox,
             onPreviousSandbox = onPreviousSandbox,
@@ -473,7 +482,7 @@ private fun PersonalAgentSuggestionStrip(
                 shape = CircleShape,
                 color = if (tokens.isDark) tokens.surface else tokens.raised,
                 contentColor = tokens.ink2,
-                border = BorderStroke(1.dp, tokens.line),
+                border = BorderStroke(0.5.dp, tokens.floatingOutline),
                 tonalElevation = 0.dp,
             ) {
                 Text(

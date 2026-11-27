@@ -3,6 +3,7 @@ package app.amber.feature.ui.theme
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toArgb
 import app.amber.core.settings.ThemeDesign
 import app.amber.core.settings.themeContrast
@@ -37,7 +38,10 @@ data class AmberTokens(
     val accent: Color,
     val accentInk: Color,
     val isDark: Boolean,
-)
+) {
+    val floatingOutline: Color get() = ink3.copy(alpha = if (isDark) 0.42f else 0.28f)
+    val accentLabel: Color get() = lerp(accent, ink, 0.55f)
+}
 
 enum class AmberBase { LIGHT, DARK, SAGE, SAGE_DARK }
 
@@ -47,7 +51,7 @@ internal const val SIT_TERRACOTTA_ACCENT_HEX = "#B8623A"
 // Accent remains independently editable; selecting the built-in restores terracotta.
 internal val AmberLight = AmberTokens(
     bg = Color(0xFFFBF9F5), surface = Color(0xFFF3EFEA), surface2 = Color(0xFFEAE4DC), raised = Color(0xFFFFFFFF),
-    ink = Color(0xFF1E1B18), ink2 = Color(0xFF3D3731), ink3 = Color(0xFF787067), ink4 = Color(0xFF9E958B),
+    ink = Color(0xFF1E1B18), ink2 = Color(0xFF3D3731), ink3 = Color(0xFF726A61), ink4 = Color(0xFF9E958B),
     line = Color(0xFFE6E0D6), line2 = Color(0xFFEFEAE1),
     userBg = Color(0xFFB8623A), userInk = Color(0xFFFFFFFF), codeBg = Color(0xFFEAE4DC),
     signal = Color(0xFF5E9C6E), accent = Color(0xFFB8623A), accentInk = Color(0xFFFFFFFF), isDark = false,
@@ -135,14 +139,18 @@ internal fun buildAmberTokens(
         accentInk = resolvedAccentInk,
         signal = accent,
         userBg = if (!themedBase.isDark) accent else themedBase.userBg,
-        userInk = if (!themedBase.isDark) resolvedAccentInk else themedBase.userInk,
+        userInk = when {
+            themedBase.isDark -> themedBase.userInk
+            accent == AmberLight.userBg -> Color.White
+            else -> resolvedAccentInk
+        },
     )
 }
 
 /** Returns one of the five portable document paper presets for the active color mode. */
 internal fun themePackPaperTokens(paper: String, isDark: Boolean): AmberTokens? {
     val colors = when (paper to isDark) {
-        "paper" to false -> PaperPalette(0xFBF9F5, 0xF3EFEA, 0xEAE4DC, 0x1E1B18, 0x3D3731, 0x787067, 0x9E958B, 0xE6E0D6, 0xEFEAE1)
+        "paper" to false -> PaperPalette(0xFBF9F5, 0xF3EFEA, 0xEAE4DC, 0x1E1B18, 0x3D3731, 0x726A61, 0x9E958B, 0xE6E0D6, 0xEFEAE1)
         "neutral" to false -> PaperPalette(0xECE8E4, 0xF6F5F3, 0xEDEBE7, 0x161514, 0x55524D, 0x716D67, 0x8F8B85, 0xD9D5CF, 0xE4E1DC)
         "white" to false -> PaperPalette(0xF5F5F4, 0xFFFFFF, 0xEEEEED, 0x1A1A1A, 0x5C5C5C, 0x737373, 0x8E8E8E, 0xD4D4D4, 0xE5E5E5)
         "pi" to false -> PaperPalette(0xF3F0EB, 0xFAF9F7, 0xEBE7E0, 0x1C1B19, 0x4A4640, 0x6A6560, 0x9A948C, 0xD4CFC7, 0xE8E4DC)

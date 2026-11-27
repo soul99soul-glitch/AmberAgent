@@ -11,6 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
@@ -49,7 +50,7 @@ fun AmberPersonaMedallion(
 ) {
     val tokens = LocalAmberTokens.current
     val accent = tokens.accent
-    val ringColor = if (tokens.isDark) tokens.line2 else tokens.raised
+    val ringColor = if (tokens.isDark) tokens.floatingOutline else Color.White.copy(alpha = 0.9f)
 
     val infiniteTransition = rememberInfiniteTransition(label = "personaMedallion")
     val haloPulse by infiniteTransition.animateFloat(
@@ -112,13 +113,13 @@ fun AmberPersonaMedallion(
                     ),
                 )
                 .border(
-                    width = 2.dp,
+                    width = 1.5.dp,
                     color = if (generating) accent.copy(alpha = 0.55f) else ringColor,
                     shape = CircleShape,
                 )
                 .border(
-                    width = 0.75.dp,
-                    color = tokens.line.copy(alpha = 0.85f),
+                    width = 0.5.dp,
+                    color = tokens.floatingOutline,
                     shape = CircleShape,
                 ),
             contentAlignment = Alignment.Center,
@@ -141,7 +142,7 @@ fun AmberPersonaMedallion(
                     tintGlow = accent.copy(alpha = if (generating) 0.18f else 0.10f),
                     headTiltDegrees = idleTilt,
                     headBobFraction = if (generating) (haloPulse - 0.5f) * 0.028f else (haloPulse - 0.5f) * 0.01f,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.fillMaxSize().padding(diameter * 0.035f),
                 )
             }
         }

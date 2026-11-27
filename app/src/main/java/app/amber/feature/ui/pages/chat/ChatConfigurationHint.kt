@@ -97,6 +97,7 @@ internal fun ChatConfigurationHint(
     } else {
         "chat_setup_configure"
     }
+    val hintTag = Modifier.testTag("chat-configuration-hint")
     if (compactPill) {
         val tokens = app.amber.feature.ui.theme.LocalAmberTokens.current
         Box(
@@ -106,13 +107,12 @@ internal fun ChatConfigurationHint(
             contentAlignment = Alignment.Center,
         ) {
             Surface(
-                modifier = Modifier
-                    .testTag("chat-configuration-hint")
+                modifier = hintTag
                     .clip(CircleShape)
                     .clickable(onClick = onConfigure),
                 shape = CircleShape,
                 color = tokens.surface,
-                border = BorderStroke(1.dp, tokens.line),
+                border = BorderStroke(0.5.dp, tokens.floatingOutline),
                 tonalElevation = 0.dp,
             ) {
                 Row(
@@ -130,7 +130,7 @@ internal fun ChatConfigurationHint(
                     )
                     Text(
                         text = actionLabel,
-                        color = tokens.accent,
+                        color = tokens.accentLabel,
                         fontSize = 12.5.sp,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
@@ -143,7 +143,7 @@ internal fun ChatConfigurationHint(
     }
     val colors = workspaceColors()
     Row(
-        modifier = Modifier.fillMaxWidth().testTag("chat-configuration-hint").padding(start = 18.dp, end = 8.dp),
+        modifier = hintTag.fillMaxWidth().padding(start = 18.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
