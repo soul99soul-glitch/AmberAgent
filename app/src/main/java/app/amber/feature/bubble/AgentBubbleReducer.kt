@@ -21,6 +21,8 @@ data class AgentBubbleUiState(
     val waitingApproval: Boolean = false,
     /** 等待的是 ask_user 提问：气泡展示"去回复"而不是批准/拒绝。 */
     val waitingAskUser: Boolean = false,
+    /** 需回到 App 内查看完整参数后审批（SSH 写工具 / 屏幕 L3 动作工具）：气泡隐藏直接“同意”。 */
+    val requiresInAppApproval: Boolean = false,
     val approvalToolCallId: String? = null,
     val approvalToolTitle: String = "",
     /** 当前正在执行的步骤标题（仅运行中的工具），空串 = 无步骤信息。 */
@@ -96,6 +98,7 @@ object AgentBubbleReducer {
                     finishedAtMillis = nowMillis,
                     waitingApproval = false,
                     waitingAskUser = false,
+                    requiresInAppApproval = false,
                     approvalToolCallId = null,
                     stepRunning = false,
                     takeoverPhase = PhoneTakeoverPhase.IDLE,
@@ -167,10 +170,8 @@ object AgentBubbleReducer {
             phase = AgentBubblePhase.RUNNING,
             conversationId = pickedConversationId,
             waitingApproval = pendingTool != null,
-            waitingAskUser = pendingTool != null && (
-                pendingTool.toolName == ASK_USER_TOOL ||
-                    pendingTool.toolName in app.amber.feature.tools.SSH_PROFILE_WRITE_TOOL_NAMES
-                ),
+            waitingAskUser = pendingTool != null && pendingTool.toolName == ASK_USER_TOOL,
+            requiresInAppApproval = pendingTool != null && requiresInAppApproval(pendingTool.toolName),
             approvalToolCallId = pendingTool?.toolCallId,
             approvalToolTitle = pendingTool?.toolName.orEmpty(),
             stepTitle = runningStepTitle(activity?.takeIf { it.conversationId == pickedConversationId }),
@@ -184,6 +185,15 @@ object AgentBubbleReducer {
             replyPreview = lastText?.takeLast(PREVIEW_TAIL_CHARS).orEmpty(),
         )
     }
+
+    /**
+     * SSH 写工具与无障碍屏幕 L3 动作工具必须在 App 内审批，禁止在悬浮气泡中直接批准。
+     */
+    fun requiresInAppApproval(toolName: String?): Boolean =
+        !toolName.isNullOrBlank() && (
+            toolName in app.amber.feature.tools.SSH_PROFILE_WRITE_TOOL_NAMES ||
+                toolName in app.amber.feature.tools.ACCESSIBILITY_L3_ACTION_TOOLS
+            )
 
     fun isVisible(
         state: AgentBubbleUiState,
