@@ -7,6 +7,7 @@ import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.ResolveInfo
+import android.graphics.BitmapFactory
 import android.graphics.SurfaceTexture
 import android.os.Handler
 import android.view.KeyEvent
@@ -50,6 +51,7 @@ import app.amber.core.jev.JevSetting
 import app.amber.core.jev.JevTransport
 import app.amber.core.jev.JevTransportResponse
 import app.amber.core.jev.JevUsageStore
+import app.amber.core.jev.ScreenshotAttempt
 import app.amber.core.settings.AgentRuntimeSetting
 import app.amber.core.settings.Settings
 import app.amber.feature.runtime.AgentToolActivityStore
@@ -99,6 +101,85 @@ class ScreenRunGoalDisplayModeTest {
         VirtualDisplayRunRegistry.clearForTest()
         AccessibilityActive.activeController = null
         Dispatchers.resetMain()
+    }
+
+    @Test
+    fun statusReportsEachVirtualGateAndOnlyMarksFullyConfiguredModeReady() = runTest {
+        suspend fun checkStatus(
+            accessibility: Boolean = true,
+            allowed: Boolean = true,
+            enabled: Boolean = true,
+            compatibility: VirtualDisplayCompatibility = VirtualDisplayCompatibility.VERIFIED,
+            hasOpener: Boolean = true,
+            ready: Boolean = false,
+        ) {
+            AccessibilityActive.activeController = if (accessibility) {
+                FakeAccessibilityController(targetSnapshot("com.example.target", "n1"))
+            } else null
+            val tools = ScreenAppScopeTools(
+                context = baseContext,
+                settingsStore = null,
+                jevScreenGoalRunner = null,
+                operations = ScreenOperationOwner(AgentToolActivityStore()),
+                virtualDisplayAllowedProvider = { allowed },
+                virtualDisplayEnabledProvider = { enabled },
+                probeCompatibilityProvider = { compatibility },
+                sessionOpener = if (hasOpener) { _, _, _ -> error("screen_status opened a session") } else null,
+            )
+            val parts = tools.screenStatusTool("run-status").execute(JsonObject(emptyMap()))
+            val result = Json.parseToJsonElement(parts.filterIsInstance<UIMessagePart.Text>().single().text).jsonObject
+            assertEquals(allowed, result.getValue("virtual_display_allowed").jsonPrimitive.boolean)
+            assertEquals(enabled, result.getValue("virtual_display_enabled").jsonPrimitive.boolean)
+            assertEquals(compatibility.name.lowercase(), result.getValue("virtual_display_compatibility").jsonPrimitive.content)
+            assertEquals(ready, result.getValue("virtual_display_ready").jsonPrimitive.boolean)
+        }
+
+        checkStatus(ready = true)
+        checkStatus(accessibility = false)
+        checkStatus(allowed = false)
+        checkStatus(enabled = false)
+        checkStatus(hasOpener = false)
+        checkStatus(compatibility = VirtualDisplayCompatibility.UNVERIFIED)
+        checkStatus(compatibility = VirtualDisplayCompatibility.FAILED)
+        checkStatus(compatibility = VirtualDisplayCompatibility.UNSUPPORTED)
+    }
+
+    @Test
+    fun defaultVirtualFrameAttachesProportionallyScaledJpeg() = runTest {
+        val width = 720
+        val height = 1600
+        val source = VirtualDisplayFrameSource(
+            width, height,
+            SinglePlaneFrameReaderPort(width, height, 0xFF000000.toInt(), 0xFFFFFFFF.toInt()),
+            ownWorkerThread = false,
+        )
+        val session = VirtualDisplaySession(
+            runId = "run-vd-screenshot",
+            packageName = "com.example.target",
+            displayId = 7,
+            generation = 1L,
+            width = width,
+            height = height,
+            dpi = 320,
+            bridge = FakeConnectedBridge(),
+            frameSource = source,
+            windowsProvider = { emptyList() },
+        )
+        try {
+            source.onImageAvailable()
+            val tools = ScreenAppScopeTools(baseContext, null, null, ScreenOperationOwner(AgentToolActivityStore()))
+            val attempt = tools.buildVirtualScreenshotProvider(session)("<<IMAGE:1>>")
+            assertTrue("Expected screenshot attachment, got ${attempt::class.simpleName}", attempt is ScreenshotAttempt.Attached)
+            val asset = (attempt as ScreenshotAttempt.Attached).asset
+            assertEquals(706, asset.widthPx)
+            assertEquals(1568, asset.heightPx)
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeByteArray(asset.data, 0, asset.data.size, bounds)
+            assertEquals(asset.widthPx, bounds.outWidth)
+            assertEquals(asset.heightPx, bounds.outHeight)
+        } finally {
+            session.close("test_complete")
+        }
     }
 
     @Test
@@ -743,6 +824,7 @@ class ScreenRunGoalDisplayModeTest {
         private val width: Int,
         private val height: Int,
         private val argbPixel: Int,
+        private val bottomHalfPixel: Int = argbPixel,
     ) : FrameReaderPort {
         override val maxImages: Int = VirtualDisplayFrameSource.MAX_IMAGES
         private val texture = SurfaceTexture(0)
@@ -750,18 +832,13 @@ class ScreenRunGoalDisplayModeTest {
         override fun setListener(handler: Handler?, listener: (() -> Unit)?) = Unit
 
         override fun acquireLatestPlane(block: (RawRgbaPlane) -> Unit): Boolean {
-            val bytes = ByteArray(width * height * 4)
-            val r = ((argbPixel ushr 16) and 0xFF).toByte()
-            val g = ((argbPixel ushr 8) and 0xFF).toByte()
-            val b = (argbPixel and 0xFF).toByte()
-            val a = ((argbPixel ushr 24) and 0xFF).toByte()
-            for (i in 0 until width * height) {
-                val base = i * 4
-                bytes[base] = r
-                bytes[base + 1] = g
-                bytes[base + 2] = b
-                bytes[base + 3] = a
+            val bytes = ByteBuffer.allocate(width * height * 4)
+            for (y in 0 until height) {
+                val argb = if (y < height / 2) argbPixel else bottomHalfPixel
+                val rgba = (argb shl 8) or (argb ushr 24)
+                repeat(width) { bytes.putInt(rgba) }
             }
+            bytes.flip()
             block(
                 RawRgbaPlane(
                     width = width,
@@ -769,7 +846,7 @@ class ScreenRunGoalDisplayModeTest {
                     rowStride = width * 4,
                     pixelStride = 4,
                     timestampNanos = 1234L,
-                    buffer = ByteBuffer.wrap(bytes),
+                    buffer = bytes,
                 ),
             )
             return true

@@ -13,6 +13,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.ComponentActivity
+import androidx.activity.addCallback
 
 /**
  * Non-exported virtual-display target Activity for the dual-display isolation self-test (R3 L12).
@@ -33,6 +34,9 @@ class IsolationProbeTargetActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         probeToken = intent.getStringExtra(IsolationProbeRunner.EXTRA_PROBE_TOKEN) ?: IsolationProbeChannel.currentToken()
+        onBackPressedDispatcher.addCallback(this) {
+            IsolationProbeChannel.recordTargetBack(probeToken, currentDisplayId())
+        }
         val currentDisplayId = currentDisplayId()
         if (currentDisplayId == Display.DEFAULT_DISPLAY) {
             IsolationProbeChannel.recordLeakedToDefaultDisplay(probeToken)
@@ -78,6 +82,8 @@ class IsolationProbeTargetActivity : ComponentActivity() {
         }
 
         editableField = EditText(this).apply {
+            // ACTION_SET_TEXT does not need an IME. Keep BACK observable by this Activity.
+            showSoftInputOnFocus = false
             hint = "Virtual display ACTION_SET_TEXT target"
             layoutParams = LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,

@@ -79,6 +79,7 @@ class VirtualDisplaySession internal constructor(
             isGenerationValid = { isGenerationValid },
             displayBoundsProvider = { Rect(0, 0, width, height) },
             motionInjector = { event -> injectMotion(event) },
+            keyInjector = { event -> injectKey(event) },
             windowsProvider = windowsProvider,
         )
 

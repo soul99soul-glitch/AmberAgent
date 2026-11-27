@@ -33,6 +33,7 @@ internal object IsolationProbeChannel {
     private val disconnectPhaseActive = AtomicBoolean(false)
 
     private val targetResumedDisplayId = AtomicInteger(Display.INVALID_DISPLAY)
+    private val targetBackReceived = AtomicBoolean(false)
     private val targetTapCount = AtomicInteger(0)
     private val targetText = AtomicReference<String>("")
 
@@ -62,6 +63,7 @@ internal object IsolationProbeChannel {
         injectionBurstActive.set(false)
         disconnectPhaseActive.set(false)
         targetResumedDisplayId.set(Display.INVALID_DISPLAY)
+        targetBackReceived.set(false)
         targetTapCount.set(0)
         targetText.set("")
         mainScreenInjectedEvents.set(0)
@@ -113,11 +115,19 @@ internal object IsolationProbeChannel {
         }
     }
 
+    fun recordTargetBack(token: String, displayId: Int) {
+        if (token == activeToken.get() && injectionBurstActive.get() &&
+            displayId > Display.DEFAULT_DISPLAY && displayId == expectedDisplayId.get()
+        ) {
+            targetBackReceived.set(true)
+        }
+    }
+
     fun recordTargetText(token: String, text: String) {
         if (token == activeToken.get()) targetText.set(text)
     }
 
-    fun recordMainScreenInjectedTouch() {
+    fun recordMainScreenInjectedEvent() {
         if (disconnectPhaseActive.get()) {
             residualAfterDisconnect.incrementAndGet()
         } else if (injectionBurstActive.get()) {
@@ -152,6 +162,7 @@ internal object IsolationProbeChannel {
     }
 
     fun targetDisplayId(): Int = targetResumedDisplayId.get()
+    fun targetBackReceived(): Boolean = targetBackReceived.get()
     fun targetTapCount(): Int = targetTapCount.get()
     fun targetText(): String = targetText.get()
     fun mainScreenInjectedEvents(): Int = mainScreenInjectedEvents.get()
@@ -169,7 +180,7 @@ internal object IsolationProbeChannel {
  * 1. Create a virtual display (720x1600 / 320dpi) via Shizuku UID 2000 with all mandatory flags.
  * 2. Launch [IsolationProbeTargetActivity] onto that virtual display.
  * 3. Verify rendered frame marker color via [VirtualDisplayFrameSource].
- * 4. Inject 20 taps + 1 Chinese `ACTION_SET_TEXT` into the virtual display while Display 0 holds focus.
+ * 4. Inject 20 taps, Chinese `ACTION_SET_TEXT`, and BACK into the virtual display while Display 0 holds focus.
  * 5. Disconnect Shizuku / tear down virtual display, verify zero post-disconnect residual events and
  *    zero Activity leakage onto Display 0.
  * 6. Persist the [IsolationProbeResult] into [VirtualDisplayProbeStore].
@@ -269,7 +280,7 @@ class IsolationProbeRunner(
                 false
             }
 
-            onProgress("4/6 请持续在主屏输入中文，正在验证虚拟屏点击和输入…")
+            onProgress("4/6 请持续在主屏输入中文，正在验证虚拟屏点击、输入和返回键隔离…")
             IsolationProbeChannel.setInjectionBurstActive(true)
             val tapX = session.width * 0.5f
             val tapY = session.height * 0.45f
@@ -293,10 +304,12 @@ class IsolationProbeRunner(
             } else {
                 false
             }
+            val targetBackObserved = safeToTestInput() && session.controller.back() &&
+                waitUntil(timeoutMs = 1_500L, pollMs = 80L) { IsolationProbeChannel.targetBackReceived() }
             IsolationProbeChannel.setInjectionBurstActive(false)
 
             val mainInputObserved = IsolationProbeChannel.mainInputObserved()
-            val readyForDisconnect = frameMarkerOk && textReadBackOk && mainInputObserved &&
+            val readyForDisconnect = frameMarkerOk && textReadBackOk && targetBackObserved && mainInputObserved &&
                 IsolationProbeChannel.isMainFocusStable() && hostActivity.hasMainInputFocus() &&
                 IsolationProbeChannel.targetTapCount() == IsolationProbeResult.REQUIRED_PROBE_TAPS &&
                 IsolationProbeChannel.mainScreenInjectedEvents() == 0 && session.isGenerationValid &&
@@ -337,6 +350,7 @@ class IsolationProbeRunner(
                 focusStable = focusStable,
                 disconnectObserved = disconnected,
                 mainInputObserved = mainInputObserved,
+                targetBackObserved = targetBackObserved,
                 targetDestroyed = destroyed,
                 residualAfterDisconnect = residual,
                 leakedToDefaultOnDestroy = IsolationProbeChannel.leakedToDefaultOnDestroy(),

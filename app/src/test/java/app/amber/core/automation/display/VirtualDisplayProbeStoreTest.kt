@@ -71,6 +71,7 @@ class VirtualDisplayProbeStoreTest {
             passingResult().copy(targetReceivedEvents = 19),
             passingResult().copy(targetReceivedEvents = 21),
             passingResult().copy(mainInputObserved = false),
+            passingResult().copy(targetBackObserved = false),
             passingResult().copy(disconnectObserved = false),
             passingResult().copy(targetDestroyed = false),
             passingResult().copy(textReadBackOk = false),
@@ -110,6 +111,9 @@ class VirtualDisplayProbeStoreTest {
         val store = VirtualDisplayProbeStore(kv, { "same-build" }, { 396L }, { true })
         assertEquals(VirtualDisplayCompatibility.UNVERIFIED, store.compatibility())
         assertNull(store.lastResult())
+        kv.write(mapOf("disconnect_observed" to true, "target_destroyed" to true, "main_input_observed" to true))
+        assertEquals(VirtualDisplayCompatibility.UNVERIFIED, store.compatibility())
+        assertNull(store.lastResult())
     }
 
     @Test
@@ -119,6 +123,11 @@ class VirtualDisplayProbeStoreTest {
         try {
             IsolationProbeChannel.setExpectedDisplayId(3)
             IsolationProbeChannel.setInjectionBurstActive(true)
+            IsolationProbeChannel.recordTargetBack(oldToken, 3)
+            IsolationProbeChannel.recordTargetBack(token, 0)
+            assertEquals(false, IsolationProbeChannel.targetBackReceived())
+            IsolationProbeChannel.recordTargetBack(token, 3)
+            assertEquals(true, IsolationProbeChannel.targetBackReceived())
             IsolationProbeChannel.recordTargetTap(oldToken, 3)
             IsolationProbeChannel.recordTargetDestroyed(oldToken, 3)
             assertEquals(0, IsolationProbeChannel.targetTapCount())
@@ -143,6 +152,7 @@ class VirtualDisplayProbeStoreTest {
         residualAfterDisconnect = 0,
         leakedToDefaultOnDestroy = false,
         detail = "ok",
+        targetBackObserved = true,
         mainInputObserved = true,
         disconnectObserved = true,
         targetDestroyed = true,

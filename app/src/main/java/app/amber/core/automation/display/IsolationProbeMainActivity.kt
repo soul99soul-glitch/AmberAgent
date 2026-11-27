@@ -10,6 +10,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.activity.ComponentActivity
+import androidx.activity.addCallback
 import androidx.core.widget.doOnTextChanged
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
@@ -60,7 +61,7 @@ class IsolationProbeMainActivity : ComponentActivity() {
                 if (value != null && hasFocus() && count > 0) {
                     val inserted = value.subSequence(start, start + count)
                     if (IsolationProbeRunner.PROBE_CHINESE_TEXT in inserted) {
-                        IsolationProbeChannel.recordMainScreenInjectedTouch()
+                        IsolationProbeChannel.recordMainScreenInjectedEvent()
                     } else if (inserted.any { it in '\u3400'..'\u9fff' }) {
                         IsolationProbeChannel.recordMainInput()
                     }
@@ -100,7 +101,7 @@ class IsolationProbeMainActivity : ComponentActivity() {
 
     override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
         if (ev?.actionMasked == MotionEvent.ACTION_DOWN) {
-            IsolationProbeChannel.recordMainScreenInjectedTouch()
+            IsolationProbeChannel.recordMainScreenInjectedEvent()
         }
         return super.dispatchTouchEvent(ev)
     }
@@ -113,20 +114,28 @@ class IsolationProbeMainActivity : ComponentActivity() {
     }
 
     internal fun hasMainInputFocus(): Boolean =
-        display?.displayId == Display.DEFAULT_DISPLAY && hasWindowFocus() && chineseFocusInput.hasFocus()
+        !isFinishing && !isDestroyed && display?.displayId == Display.DEFAULT_DISPLAY &&
+            hasWindowFocus() && chineseFocusInput.hasFocus()
 
     private fun runProbe() {
         if (!startButton.isEnabled) return
         startButton.isEnabled = false
         chineseFocusInput.requestFocus()
         lifecycleScope.launch {
-            val result = probeRunner.run(
-                hostActivity = this@IsolationProbeMainActivity,
-                onProgress = { msg -> runOnUiThread { statusView.text = msg } },
-            )
-            statusView.text = "Done • compatibility=${probeStore.compatibility()}"
-            resultView.text = result.toString()
-            startButton.isEnabled = true
+            val backMonitor = onBackPressedDispatcher.addCallback(this@IsolationProbeMainActivity) {
+                IsolationProbeChannel.recordMainScreenInjectedEvent()
+            }
+            try {
+                val result = probeRunner.run(
+                    hostActivity = this@IsolationProbeMainActivity,
+                    onProgress = { msg -> runOnUiThread { statusView.text = msg } },
+                )
+                statusView.text = "Done • compatibility=${probeStore.compatibility()}"
+                resultView.text = result.toString()
+            } finally {
+                backMonitor.remove()
+                startButton.isEnabled = true
+            }
         }
     }
 

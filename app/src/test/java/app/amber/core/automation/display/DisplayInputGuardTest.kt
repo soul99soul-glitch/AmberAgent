@@ -200,7 +200,7 @@ class DisplayInputGuardTest {
     }
 
     @Test
-    fun virtualAccessibilityControllerBlocksBackHomeAndDefaultDisplaySnapshots() {
+    fun virtualAccessibilityControllerWithoutKeyInjectorRejectsKeysAndDefaultDisplaySnapshots() {
         val controller = VirtualDisplayAccessibilityController(
             displayId = 15,
             generation = 4L,
@@ -211,8 +211,8 @@ class DisplayInputGuardTest {
             windowsProvider = { emptyList() },
         )
 
-        // back(), home(), and returnToHostApp() must ALWAYS return false.
         assertFalse(controller.back())
+        assertFalse(controller.pressEnter())
         assertFalse(controller.home())
         assertFalse(controller.returnToHostApp("app.amber.agent"))
 
@@ -236,6 +236,67 @@ class DisplayInputGuardTest {
         // Verify snapshot ID format helper matches frozen contract.
         val formatted = VirtualDisplayAccessibilityController.formatSnapshotId(15, 4L, 7L, "deadbeef")
         assertTrue(formatted.startsWith("vd:15:4:7"))
+    }
+
+    @Test
+    fun virtualControllerKeysRequireCurrentGenerationAndMatchingReadbackForEachEvent() {
+        val backend = FakeDisplayServiceBackend()
+        val service = AmberDisplayUserService(backend, onDestroyProcess = {})
+        val texture = SurfaceTexture(13)
+        val surface = Surface(texture)
+        val pkg = "com.example.target"
+        try {
+            val id = service.createDisplay("run-keys", pkg, 4L, 720, 1600, 320, surface)
+            assertTrue(id > Display.DEFAULT_DISPLAY)
+            assertEquals(0, service.launchOnDisplay(4L, id, pkg))
+            var valid = true
+            val readbacks = mutableListOf<Int>()
+            backend.readBackDisplayIdOverride = { requestedId ->
+                readbacks += requestedId
+                requestedId
+            }
+            val controller = VirtualDisplayAccessibilityController(
+                displayId = id,
+                generation = 4L,
+                expectedPackageName = pkg,
+                isGenerationValid = { valid },
+                displayBoundsProvider = { Rect(0, 0, 720, 1600) },
+                motionInjector = { false },
+                keyInjector = { service.injectKey(4L, id, pkg, it) },
+            )
+
+            assertTrue(controller.back())
+            assertTrue(controller.pressEnter())
+            assertFalse(controller.home())
+            assertFalse(controller.returnToHostApp("app.amber.agent"))
+            val keys = backend.injectedEvents.map { it as KeyEvent }
+            assertEquals(listOf(id, id, id, id), readbacks)
+            assertEquals(
+                listOf(KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_ENTER),
+                keys.map { it.keyCode },
+            )
+            assertEquals(
+                listOf(KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP, KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP),
+                keys.map { it.action },
+            )
+
+            valid = false
+            assertFalse(controller.back())
+            assertEquals(4, readbacks.size)
+
+            valid = true
+            backend.readBackDisplayIdOverride = {
+                valid = false
+                it
+            }
+            assertFalse(controller.back())
+            assertEquals(5, backend.injectedEvents.size)
+            assertEquals(KeyEvent.ACTION_DOWN, (backend.injectedEvents.last() as KeyEvent).action)
+        } finally {
+            service.release(4L, "test_complete")
+            surface.release()
+            texture.release()
+        }
     }
 
     private class FakeDisplayServiceBackend(

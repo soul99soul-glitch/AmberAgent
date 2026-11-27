@@ -130,6 +130,7 @@ class AmberDisplayUserService internal constructor(
             when (val withTrusted = backend.createVirtualDisplay("amber_vd_${generation}", width, height, dpi, surface, requiredFlags or trustedFlag)) {
                 is CreateDisplayBackendResult.Created -> withTrusted
                 is CreateDisplayBackendResult.FlagRejected -> {
+                    Log.i(TAG, "Optional TRUSTED flag rejected: ${withTrusted.detail}")
                     // TRUSTED is optional; retry strictly with ALL required flags intact (no downgrade of required flags).
                     backend.createVirtualDisplay("amber_vd_${generation}", width, height, dpi, surface, requiredFlags)
                 }
@@ -143,6 +144,7 @@ class AmberDisplayUserService internal constructor(
             is CreateDisplayBackendResult.Created -> {
                 val displayId = created.handle.displayId
                 if (displayId <= Display.DEFAULT_DISPLAY) {
+                    Log.w(TAG, "Created virtual display has invalid displayId=$displayId")
                     runCatching { created.handle.release() }
                     ERR_INVALID_DISPLAY_ID
                 } else {
@@ -156,8 +158,14 @@ class AmberDisplayUserService internal constructor(
                     displayId
                 }
             }
-            is CreateDisplayBackendResult.FlagRejected -> ERR_FLAG_REJECTED
-            is CreateDisplayBackendResult.Failed -> ERR_CREATE_FAILED
+            is CreateDisplayBackendResult.FlagRejected -> {
+                Log.w(TAG, "createVirtualDisplay rejected required flags=$requiredFlags: ${created.detail}")
+                ERR_FLAG_REJECTED
+            }
+            is CreateDisplayBackendResult.Failed -> {
+                Log.w(TAG, "createVirtualDisplay failed: ${created.detail}")
+                ERR_CREATE_FAILED
+            }
         }
     }
 
@@ -358,7 +366,7 @@ internal class AndroidDisplayServiceBackend(
             resolvedContext?.packageManager?.hasSystemFeature(
                 PackageManager.FEATURE_ACTIVITIES_ON_SECONDARY_DISPLAYS,
             ) == true
-        }.getOrDefault(false)
+        }.onFailure { Log.w(TAG, "Secondary display capability lookup failed", it) }.getOrDefault(false)
         return DisplayCapabilities(
             apiLevel = apiLevel,
             uid = uid(),
@@ -383,9 +391,9 @@ internal class AndroidDisplayServiceBackend(
         surface: Surface,
         flags: Int,
     ): CreateDisplayBackendResult {
-        val dm = resolvedContext?.getSystemService(DisplayManager::class.java)
-            ?: return CreateDisplayBackendResult.Failed("display_manager_unavailable")
         return try {
+            val dm = resolvedContext?.getSystemService(DisplayManager::class.java)
+                ?: return CreateDisplayBackendResult.Failed("display_manager_unavailable")
             val vd: VirtualDisplay = dm.createVirtualDisplay(name, width, height, dpi, surface, flags)
                 ?: return CreateDisplayBackendResult.Failed("create_virtual_display_returned_null")
             val displayId = vd.display?.displayId ?: Display.INVALID_DISPLAY
@@ -398,11 +406,11 @@ internal class AndroidDisplayServiceBackend(
                 },
             )
         } catch (se: SecurityException) {
-            CreateDisplayBackendResult.FlagRejected(se.message ?: "security_exception")
+            CreateDisplayBackendResult.FlagRejected(se.toString())
         } catch (iae: IllegalArgumentException) {
-            CreateDisplayBackendResult.FlagRejected(iae.message ?: "illegal_argument")
+            CreateDisplayBackendResult.FlagRejected(iae.toString())
         } catch (t: Throwable) {
-            CreateDisplayBackendResult.Failed(t.message ?: t.javaClass.simpleName)
+            CreateDisplayBackendResult.Failed(t.toString())
         }
     }
 
@@ -430,8 +438,8 @@ internal class AndroidDisplayServiceBackend(
         val setMethod = InputEvent::class.java.getMethod("setDisplayId", Int::class.javaPrimitiveType)
         val getMethod = InputEvent::class.java.getMethod("getDisplayId")
         setMethod.invoke(event, displayId)
-        getMethod.invoke(event) as? Int
-    }.getOrNull()
+        getMethod.invoke(event) as Int
+    }.onFailure { Log.w(TAG, "InputEvent display ID set/readback failed for display=$displayId", it) }.getOrNull()
 
     override fun injectInputEvent(event: InputEvent): Boolean = runCatching {
         val target = resolveInputManagerInstance() ?: return@runCatching false
@@ -440,40 +448,43 @@ internal class AndroidDisplayServiceBackend(
             InputEvent::class.java,
             Int::class.javaPrimitiveType,
         )
-        (injectMethod.invoke(target, event, INJECT_INPUT_EVENT_MODE_WAIT_FOR_RESULT) as? Boolean) == true
-    }.getOrDefault(false)
+        val accepted = injectMethod.invoke(target, event, INJECT_INPUT_EVENT_MODE_WAIT_FOR_RESULT) as Boolean
+        if (!accepted) Log.w(TAG, "injectInputEvent returned false")
+        accepted
+    }.onFailure { Log.w(TAG, "injectInputEvent failed", it) }.getOrDefault(false)
 
     private fun resolveInputManagerInstance(): Any? {
         runCatching {
             val globalClass = Class.forName("android.hardware.input.InputManagerGlobal")
             val getInstance = globalClass.getMethod("getInstance")
-            getInstance.invoke(null)
-        }.getOrNull()?.let { return it }
+            checkNotNull(getInstance.invoke(null))
+        }.onFailure { Log.d(TAG, "InputManagerGlobal.getInstance unavailable", it) }.getOrNull()?.let { return it }
 
         runCatching {
             val getInstance = InputManager::class.java.getMethod("getInstance")
-            getInstance.invoke(null)
-        }.getOrNull()?.let { return it }
+            checkNotNull(getInstance.invoke(null))
+        }.onFailure { Log.d(TAG, "InputManager.getInstance unavailable", it) }.getOrNull()?.let { return it }
 
         return runCatching {
-            resolvedContext?.getSystemService(InputManager::class.java)
-        }.getOrNull()
+            checkNotNull(resolvedContext?.getSystemService(InputManager::class.java)) { "InputManager service unavailable" }
+        }.onFailure { Log.w(TAG, "All InputManager resolution paths failed", it) }.getOrNull()
     }
 
     private fun readDisplayManagerIntConstant(fieldName: String): Int? = runCatching {
         val field = DisplayManager::class.java.getDeclaredField(fieldName)
         field.isAccessible = true
         field.getInt(null)
-    }.getOrNull()
+    }.onFailure { Log.w(TAG, "Cannot resolve DisplayManager.$fieldName", it) }.getOrNull()
 
     private fun resolveSystemContextReflectively(): Context? = runCatching {
         val activityThreadClass = Class.forName("android.app.ActivityThread")
         val current = activityThreadClass.getMethod("currentActivityThread").invoke(null)
-            ?: activityThreadClass.getMethod("systemMain").invoke(null)
-        activityThreadClass.getMethod("getSystemContext").invoke(current) as? Context
-    }.getOrNull()
+            ?: checkNotNull(activityThreadClass.getMethod("systemMain").invoke(null)) { "ActivityThread.systemMain returned null" }
+        activityThreadClass.getMethod("getSystemContext").invoke(current) as Context
+    }.onFailure { Log.w(TAG, "ActivityThread system context lookup failed on SDK ${Build.VERSION.SDK_INT}", it) }.getOrNull()
 
     companion object {
+        private const val TAG = "AmberDisplayUserService"
         private const val INJECT_INPUT_EVENT_MODE_WAIT_FOR_RESULT = 1
     }
 }

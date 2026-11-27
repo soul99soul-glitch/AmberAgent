@@ -20,6 +20,7 @@ data class IsolationProbeResult(
     val disconnectObserved: Boolean = false,
     val targetDestroyed: Boolean = false,
     val mainInputObserved: Boolean = false,
+    val targetBackObserved: Boolean = false,
 ) {
     fun meetsAllStrictCriteria(requiredTaps: Int = REQUIRED_PROBE_TAPS): Boolean =
         passed && evidenceFailures(requiredTaps).isEmpty()
@@ -30,6 +31,7 @@ data class IsolationProbeResult(
         if (!textReadBackOk) add("textReadBackOk=false")
         if (!frameMarkerOk) add("frameMarkerOk=false")
         if (!focusStable) add("focusStable=false")
+        if (!targetBackObserved) add("targetBackObserved=false")
         if (!mainInputObserved) add("mainInputObserved=false")
         if (!disconnectObserved) add("disconnectObserved=false")
         if (!targetDestroyed) add("targetDestroyed=false")
@@ -142,6 +144,7 @@ class VirtualDisplayProbeStore internal constructor(
                 KEY_DISCONNECT_OBSERVED to result.disconnectObserved,
                 KEY_TARGET_DESTROYED to result.targetDestroyed,
                 KEY_MAIN_INPUT_OBSERVED to result.mainInputObserved,
+                KEY_TARGET_BACK_OBSERVED to result.targetBackObserved,
             ),
         )
     }
@@ -163,8 +166,8 @@ class VirtualDisplayProbeStore internal constructor(
     }
 
     private fun readStoredResultLocked(): IsolationProbeResult? {
-        // Older probes treated an orderly local close as a Shizuku disconnect.
-        if (!kv.contains(KEY_PASSED) || !kv.contains(KEY_DISCONNECT_OBSERVED)) return null
+        // Historical probes lack evidence for disconnect or display-scoped BACK.
+        if (!kv.contains(KEY_PASSED) || !kv.contains(KEY_DISCONNECT_OBSERVED) || !kv.contains(KEY_TARGET_BACK_OBSERVED)) return null
         return IsolationProbeResult(
             passed = kv.getBoolean(KEY_PASSED, false),
             mainScreenInjectedEvents = kv.getInt(KEY_MAIN_INJECTED, -1),
@@ -177,6 +180,7 @@ class VirtualDisplayProbeStore internal constructor(
             detail = kv.getString(KEY_DETAIL).orEmpty(),
             disconnectObserved = kv.getBoolean(KEY_DISCONNECT_OBSERVED, false),
             targetDestroyed = kv.getBoolean(KEY_TARGET_DESTROYED, false),
+            targetBackObserved = kv.getBoolean(KEY_TARGET_BACK_OBSERVED, false),
             mainInputObserved = kv.getBoolean(KEY_MAIN_INPUT_OBSERVED, false),
         )
     }
@@ -196,6 +200,7 @@ class VirtualDisplayProbeStore internal constructor(
         private const val KEY_DETAIL = "detail"
         private const val KEY_DISCONNECT_OBSERVED = "disconnect_observed"
         private const val KEY_TARGET_DESTROYED = "target_destroyed"
+        private const val KEY_TARGET_BACK_OBSERVED = "target_back_observed"
         private const val KEY_MAIN_INPUT_OBSERVED = "main_input_observed"
 
         internal fun resolveAppVersionCode(context: Context): Long {

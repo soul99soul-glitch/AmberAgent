@@ -25,6 +25,7 @@ import app.amber.core.automation.display.VirtualDisplayRunRegistry
 import app.amber.core.automation.display.VirtualDisplaySession
 import app.amber.core.automation.display.VirtualDisplaySessionState
 import app.amber.core.automation.display.isPhoneUseVirtualDisplayEnabled
+import app.amber.core.jev.JevLimits
 import app.amber.core.jev.JevImageAsset
 import app.amber.core.jev.JevScreenGoalRunner
 import app.amber.core.jev.ScreenshotAttempt
@@ -50,6 +51,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.math.roundToInt
 
 /** Installed-app scope, run controls and the bounded Jev goal entry. */
 internal class ScreenAppScopeTools(
@@ -75,7 +77,7 @@ internal class ScreenAppScopeTools(
     fun screenStatusTool(runId: String?) = Tool(
         name = "screen_status",
         description = "Report AmberAgent screen-control readiness: whether the Accessibility " +
-            "service is enabled, the persisted app allow-list that screen_run_goal may operate in, " +
+            "service is enabled, virtual display readiness, the persisted app allow-list that screen_run_goal may operate in, " +
             "whether another screen operation is currently running, and whether this run was " +
             "ended by screen_stop. Read-only: never starts or re-pairs the control service, never " +
             "launches an app. When the allow-list is empty, call screen_apps then screen_add_app first.",
@@ -83,8 +85,19 @@ internal class ScreenAppScopeTools(
         execute = {
             val allowed = allowedPackages()
             val serviceAvailable = getActiveAccessibilityController() != null
+            val virtualAllowed = virtualDisplayAllowedProvider()
+            val virtualEnabled = virtualDisplayEnabledProvider()
+            val compatibility = probeCompatibilityProvider()
             textJson {
                 put("accessibility_enabled", serviceAvailable)
+                put("virtual_display_allowed", virtualAllowed)
+                put("virtual_display_enabled", virtualEnabled)
+                put("virtual_display_compatibility", compatibility.name.lowercase())
+                put(
+                    "virtual_display_ready",
+                    serviceAvailable && virtualAllowed && virtualEnabled &&
+                        compatibility == VirtualDisplayCompatibility.VERIFIED && sessionOpener != null,
+                )
                 put("session_stopped", operations.isStopped(runId))
                 put("stop_scope", if (operations.runKey(runId) != null) "run" else "unbound")
                 put("operation_active", operations.isActive)
@@ -678,7 +691,7 @@ internal class ScreenAppScopeTools(
         return JsonObject(outcome + overrides)
     }
 
-    private fun buildVirtualScreenshotProvider(
+    internal fun buildVirtualScreenshotProvider(
         session: PhoneDisplaySession,
     ): (suspend (reference: String) -> ScreenshotAttempt) {
         val frameSource: VirtualDisplayFrameSource? = (session as? VirtualDisplaySession)?.frameSource
@@ -690,37 +703,45 @@ internal class ScreenAppScopeTools(
                 (session as? VirtualDisplaySession)?.markUnobservable("virtual_display_frame_unobservable")
                 return@provider ScreenshotAttempt.Skipped("virtual_display_unobservable")
             }
-            val bitmap = withContext(Dispatchers.Default) { frameSource.copyLatestBitmap() }
-                ?: return@provider ScreenshotAttempt.Skipped("virtual_frame_not_ready")
-            try {
-                if (bitmap.width > 1_568 || bitmap.height > 1_568) {
-                    return@provider ScreenshotAttempt.Skipped("image_edge_out_of_range")
-                }
-                val bytes = withContext(Dispatchers.Default) {
-                    ByteArrayOutputStream().use { out ->
-                        bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
-                        out.toByteArray()
+            withContext(Dispatchers.Default) {
+                val bitmap = frameSource.copyLatestBitmap() ?: return@withContext ScreenshotAttempt.Skipped("virtual_frame_not_ready")
+                var scaled = bitmap
+                try {
+                    scaled = scaleBitmapWithinMaxEdge(bitmap, JevLimits.MAX_IMAGE_EDGE_PX)
+                    if (minOf(scaled.width, scaled.height) < JevLimits.MIN_IMAGE_EDGE_PX) {
+                        return@withContext ScreenshotAttempt.Skipped("image_edge_out_of_range")
                     }
-                }
-                runCatching {
+                    val out = ByteArrayOutputStream()
+                    if (!scaled.compress(Bitmap.CompressFormat.JPEG, 85, out)) {
+                        return@withContext ScreenshotAttempt.Skipped("image_encode_failed")
+                    }
                     ScreenshotAttempt.Attached(
                         JevImageAsset(
                             reference = reference,
                             format = "jpeg",
-                            data = bytes,
-                            widthPx = bitmap.width,
-                            heightPx = bitmap.height,
+                            data = out.toByteArray(),
+                            widthPx = scaled.width,
+                            heightPx = scaled.height,
                         ),
                     )
-                }.getOrElse {
-                    ScreenshotAttempt.Skipped("image_edge_out_of_range")
-                }
-            } finally {
-                if (!bitmap.isRecycled) {
-                    runCatching { bitmap.recycle() }
+                } finally {
+                    if (scaled !== bitmap) scaled.recycle()
+                    bitmap.recycle()
                 }
             }
         }
+    }
+
+    private fun scaleBitmapWithinMaxEdge(bitmap: Bitmap, maxEdge: Int): Bitmap {
+        val longest = maxOf(bitmap.width, bitmap.height)
+        if (longest <= maxEdge) return bitmap
+        val scale = maxEdge.toDouble() / longest
+        return Bitmap.createScaledBitmap(
+            bitmap,
+            (bitmap.width * scale).roundToInt().coerceAtLeast(1),
+            (bitmap.height * scale).roundToInt().coerceAtLeast(1),
+            true,
+        )
     }
 
     private fun buildVirtualOcrEngine(session: PhoneDisplaySession): DefaultScreenOcrEngine? {

@@ -5,6 +5,7 @@ import android.os.Bundle
 import android.os.SystemClock
 import android.view.Display
 import android.view.InputDevice
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
@@ -28,7 +29,7 @@ import kotlin.coroutines.cancellation.CancellationException
  * one monotonic [generation].
  *
  * Isolation invariants:
- * - [back], [home], and [returnToHostApp] ALWAYS return `false` so global actions never leak to Display 0.
+ * - [back] and [pressEnter] use only the session-scoped [keyInjector]. [home] and [returnToHostApp] are disabled.
  * - [captureScreenSnapshot], [performScreenAction], [setFocusedText], [dumpUiTree], and [findTextNodes]
  *   ONLY inspect [AmberAccessibilityService.windowsOnDisplay] for [displayId] — never falling back to
  *   `rootInActiveWindow` or default-display windows.
@@ -49,6 +50,7 @@ class VirtualDisplayAccessibilityController(
         AmberAccessibilityService.getActiveService()?.windowsOnDisplay(id).orEmpty()
     },
     private val uptimeMillisProvider: () -> Long = { SystemClock.uptimeMillis() },
+    private val keyInjector: ((KeyEvent) -> Boolean)? = null,
 ) : AccessibilityController {
 
     private val snapshotSeq = AtomicLong(0L)
@@ -56,8 +58,18 @@ class VirtualDisplayAccessibilityController(
     @Volatile
     private var lastSnapshotId: String? = null
 
-    /** Global navigation keys are prohibited on virtual displays because they target Display 0. */
-    override fun back(): Boolean = false
+    override fun back(): Boolean = dispatchKeyPress(KeyEvent.KEYCODE_BACK)
+
+    fun pressEnter(): Boolean = dispatchKeyPress(KeyEvent.KEYCODE_ENTER)
+
+    private fun dispatchKeyPress(keyCode: Int): Boolean {
+        val inject = keyInjector ?: return false
+        if (!canDispatch()) return false
+        val downTime = uptimeMillisProvider()
+        val down = KeyEvent(downTime, downTime, KeyEvent.ACTION_DOWN, keyCode, 0)
+        if (!inject(down) || !canDispatch()) return false
+        return inject(KeyEvent(downTime, uptimeMillisProvider(), KeyEvent.ACTION_UP, keyCode, 0))
+    }
 
     /** Global home action is prohibited on virtual displays because it targets Display 0. */
     override fun home(): Boolean = false
@@ -155,6 +167,11 @@ class VirtualDisplayAccessibilityController(
             try {
                 if (target.isPassword || !target.isEnabled || !target.isEditable) {
                     return@withDisplayAppRoot false
+                }
+                if (!target.isFocused) {
+                    if (!canDispatch()) return@withDisplayAppRoot false
+                    runCatching { target.performAction(AccessibilityNodeInfo.ACTION_FOCUS) }
+                        .getOrElse { return@withDisplayAppRoot false }
                 }
                 val args = Bundle().apply {
                     putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)

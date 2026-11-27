@@ -346,6 +346,7 @@ class VirtualDisplaySessionStateTest {
                     passed = true,
                     disconnectObserved = true,
                     targetDestroyed = true,
+                    targetBackObserved = true,
                     mainInputObserved = true,
                     mainScreenInjectedEvents = 0,
                     targetReceivedEvents = 20,
