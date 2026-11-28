@@ -5,8 +5,15 @@ import android.net.Network
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.os.Build
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.Closeable
@@ -25,11 +32,27 @@ internal class LocalAdbTlsClient(context: Context) {
     private val app = context.applicationContext
     private val keys = LocalAdbKeyStore(app)
 
-    suspend fun pair(port: Int?, code: String) = withContext(Dispatchers.IO) {
+    fun pairingEndpoints(): Flow<InetSocketAddress?> = localEndpoints(PAIRING_SERVICE, null)
+
+    suspend fun pair(port: Int?, code: String) = pairUsing(code) {
+        openSocket(endpoint(port, PAIRING_SERVICE))
+    }
+
+    suspend fun pairDiscovered(endpoint: InetSocketAddress?, code: String) = pairUsing(code) {
+        val cached = endpoint?.takeIf { it.port > 0 && it.address?.let(::isLocal) == true }
+        val connected = try {
+            cached?.let(::openSocket)
+        } catch (_: IOException) {
+            // A system pairing dialog can reopen on a new port while its notification is visible.
+            null
+        }
+        connected ?: openSocket(discover(PAIRING_SERVICE, null))
+    }
+
+    private suspend fun pairUsing(code: String, connect: suspend () -> Socket) = withContext(Dispatchers.IO) {
         check(Build.VERSION.SDK_INT >= 34) { "adb_requires_android_14" }
         require(code.matches(Regex("[0-9]{6}"))) { "adb_invalid_pairing_code" }
-        val endpoint = endpoint(port, "_adb-tls-pairing._tcp")
-        openSocket(endpoint).use { raw ->
+        connect().use { raw ->
             startTls(raw).use { tls ->
                 val guid = AdbSpake2Pairing.pair(tls, code, keys.adbPublicKey())
                 keys.recordPaired(guid)
@@ -119,49 +142,88 @@ internal class LocalAdbTlsClient(context: Context) {
         }
     }
 
-    /** All callback registration, resolution and teardown run on the same executor. */
-    private suspend fun discover(type: String, guid: String?): InetSocketAddress = withContext(Dispatchers.Main.immediate) {
+    private suspend fun discover(type: String, guid: String?): InetSocketAddress =
+        withTimeoutOrNull(8_000L) { localEndpoints(type, guid).filterNotNull().first() }
+            ?: throw IOException("adb_local_port_not_found:$type")
+
+    /** Callback registration, updates and cleanup are serialized on the main executor. */
+    private fun localEndpoints(type: String, guid: String?): Flow<InetSocketAddress?> = callbackFlow {
+        check(Build.VERSION.SDK_INT >= 34) { "adb_requires_android_14" }
         val nsd = checkNotNull(app.getSystemService(NsdManager::class.java)) { "adb_nsd_unavailable" }
         val executor = app.mainExecutor
-        val result = CompletableDeferred<InetSocketAddress>()
-        val resolutions = mutableListOf<NsdManager.ServiceInfoCallback>()
+        val resolutions = mutableMapOf<Pair<String, Network?>, NsdManager.ServiceInfoCallback>()
+        val endpoints = linkedMapOf<Pair<String, Network?>, InetSocketAddress>()
         var stopped = false
+        fun publish() { trySend(endpoints.values.lastOrNull()) }
         val discovery = object : NsdManager.DiscoveryListener {
             override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
-                result.completeExceptionally(IOException("adb_discovery_failed:$errorCode"))
+                close(IOException("adb_discovery_failed:$errorCode"))
             }
             override fun onDiscoveryStarted(serviceType: String) = Unit
-            override fun onDiscoveryStopped(serviceType: String) = Unit
+            override fun onDiscoveryStopped(serviceType: String) {
+                if (!stopped) close(IOException("adb_discovery_stopped"))
+            }
             override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) = Unit
-            override fun onServiceLost(serviceInfo: NsdServiceInfo) = Unit
+            override fun onServiceLost(serviceInfo: NsdServiceInfo) {
+                val key = serviceInfo.serviceName to serviceInfo.network
+                val resolver = resolutions.remove(key) ?: return
+                endpoints.remove(key)
+                publish()
+                runCatching { nsd.unregisterServiceInfoCallback(resolver) }
+            }
             override fun onServiceFound(serviceInfo: NsdServiceInfo) {
-                if (stopped || result.isCompleted || (guid != null && serviceInfo.serviceName != guid)) return
+                val key = serviceInfo.serviceName to serviceInfo.network
+                if (stopped || key in resolutions || (guid != null && serviceInfo.serviceName != guid)) return
                 val resolver = object : NsdManager.ServiceInfoCallback {
-                    override fun onServiceInfoCallbackRegistrationFailed(errorCode: Int) = Unit
+                    override fun onServiceInfoCallbackRegistrationFailed(errorCode: Int) {
+                        if (resolutions[key] === this) {
+                            resolutions.remove(key)
+                            endpoints.remove(key)
+                            publish()
+                        }
+                    }
                     override fun onServiceInfoCallbackUnregistered() = Unit
-                    override fun onServiceLost() = Unit
+                    override fun onServiceLost() {
+                        if (resolutions[key] === this) {
+                            endpoints.remove(key)
+                            publish()
+                        }
+                    }
                     override fun onServiceUpdated(info: NsdServiceInfo) {
-                        val local = info.hostAddresses.firstOrNull(::isLocal) ?: return
-                        if (info.port in 1..65535) result.complete(InetSocketAddress(local, info.port))
+                        if (resolutions[key] !== this) return
+                        val local = info.hostAddresses.firstOrNull(::isLocal)
+                        if (local != null && info.port in 1..65535) {
+                            val endpoint = InetSocketAddress(local, info.port)
+                            if (endpoints[key] != endpoint) {
+                                endpoints.remove(key)
+                                endpoints[key] = endpoint
+                            }
+                        } else {
+                            endpoints.remove(key)
+                        }
+                        publish()
                     }
                 }
+                resolutions[key] = resolver
                 try {
                     nsd.registerServiceInfoCallback(serviceInfo, executor, resolver)
-                    resolutions += resolver
                 } catch (e: RuntimeException) {
-                    result.completeExceptionally(e)
+                    resolutions.remove(key)
+                    close(e)
                 }
             }
         }
+        publish()
         nsd.discoverServices(type, NsdManager.PROTOCOL_DNS_SD, null as Network?, executor, discovery)
         try {
-            withTimeoutOrNull(8_000L) { result.await() } ?: throw IOException("adb_local_port_not_found:$type")
+            awaitClose()
         } finally {
             stopped = true
             runCatching { nsd.stopServiceDiscovery(discovery) }
-            resolutions.forEach { runCatching { nsd.unregisterServiceInfoCallback(it) } }
+            resolutions.values.toList().forEach { runCatching { nsd.unregisterServiceInfoCallback(it) } }
+            resolutions.clear()
         }
-    }
+    }.flowOn(Dispatchers.Main.immediate).conflate().distinctUntilChanged()
 
     private fun isLocal(address: InetAddress): Boolean =
         address.isLoopbackAddress || NetworkInterface.getByInetAddress(address) != null
@@ -214,6 +276,7 @@ internal class LocalAdbTlsClient(context: Context) {
     private fun littleEndian(size: Int): ByteBuffer = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN)
 
     private companion object {
+        const val PAIRING_SERVICE = "_adb-tls-pairing._tcp"
         const val IO_TIMEOUT_MS = 8_000
         const val VERSION = 0x01000001
         const val TLS_VERSION = 0x01000000

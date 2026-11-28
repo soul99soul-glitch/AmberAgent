@@ -52,9 +52,14 @@
     <string name="vd_adb_paired_desc">請開啟系統無線偵錯，再連線至輔助程序。</string>
     <string name="vd_adb_unpaired">尚未配對</string>
     <string name="vd_adb_pair_instructions">在開發人員選項開啟「無線偵錯」，選擇「使用配對碼配對裝置」。保持對話框開啟，下拉通知列，在 AmberAgent 通知中輸入配對碼。</string>
+    <string name="vd_adb_waiting">正在等候配對服務。請在開發人員選項開啟「無線偵錯」，點選「使用配對碼配對裝置」。</string>
+    <string name="vd_adb_found">已發現配對服務（連接埠 %1$d）。請保持系統對話框開啟，點選下方「六位配對碼」輸入。</string>
+    <string name="vd_adb_cancel">停止等候</string>
+    <string name="vd_adb_success_connected">配對成功，輔助程序已連線。點此返回 Amber。</string>
+    <string name="vd_adb_success_disconnected">配對成功。點此返回 Amber，再點選「連線至輔助程序」。</string>
     <string name="vd_adb_go_pair">前往無線偵錯配對</string>
     <string name="vd_adb_manual_pair">手動輸入配對連接埠與配對碼</string>
-    <string name="vd_adb_manual_pair_hint">填寫系統配對對話框中的連接埠和六位配對碼。可使用分割畫面保持對話框開啟。</string>
+    <string name="vd_adb_manual_pair_hint">請保持系統配對對話框開啟。可直接下拉通知列輸入六位配對碼，也可使用分割畫面或浮動視窗，在此填寫配對連接埠和配對碼。</string>
     <string name="vd_adb_code">六位配對碼</string>
     <string name="vd_adb_six_digits">請輸入完整的六位配對碼。</string>
     <string name="vd_adb_pair_port">配對連接埠</string>

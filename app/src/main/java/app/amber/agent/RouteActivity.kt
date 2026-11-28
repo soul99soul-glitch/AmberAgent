@@ -466,7 +466,7 @@ class RouteActivity : FragmentActivity() {
         if (launchedFromProactiveDeepLink) {
             return Screen.PersonalAgent
         }
-        phoneUseLiveScreenFromIntent(intent)?.let { screen ->
+        phoneUseScreenFromIntent(intent)?.let { screen ->
             return screen
         }
         if (openPersonalAgentFromIntent(intent)) {
@@ -576,7 +576,7 @@ class RouteActivity : FragmentActivity() {
         }
 
         val initialBackStack = remember(startScreen, startMode) {
-            if (startScreen is Screen.PhoneUseLive) {
+            if (startScreen is Screen.PhoneUseLive || startScreen == Screen.SettingPhoneUseDisplay) {
                 listOf(Screen.PersonalAgent, startScreen)
             } else {
                 initialBackStackFor(startScreen = startScreen, startMode = startMode)

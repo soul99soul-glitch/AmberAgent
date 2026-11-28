@@ -1,5 +1,6 @@
 package app.amber.agent
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.navigation3.runtime.NavKey
@@ -56,7 +57,15 @@ internal fun applyProactiveDeepLinkToBackStack(backStack: MutableList<NavKey>) {
     backStack.add(Screen.PersonalAgent)
 }
 
-internal fun phoneUseLiveScreenFromIntent(intent: Intent?): Screen.PhoneUseLive? {
+private const val ACTION_PHONE_USE_DISPLAY_SETTINGS = "app.amber.action.PHONE_USE_DISPLAY_SETTINGS"
+
+internal fun phoneUseDisplaySettingsIntent(context: Context): Intent =
+    Intent(context, RouteActivity::class.java)
+        .setAction(ACTION_PHONE_USE_DISPLAY_SETTINGS)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+
+internal fun phoneUseScreenFromIntent(intent: Intent?): Screen? {
+    if (intent?.action == ACTION_PHONE_USE_DISPLAY_SETTINGS) return Screen.SettingPhoneUseDisplay
     if (intent?.action != VirtualDisplayRunNotifier.ACTION_VIEW_VIRTUAL_RUN) return null
     val run = VirtualDisplayRunRegistry.forIntent(intent) ?: return null
     return Screen.PhoneUseLive(runId = run.runId)

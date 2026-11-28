@@ -52,9 +52,14 @@
     <string name="vd_adb_paired_desc">请打开系统无线调试，再连接辅助进程。</string>
     <string name="vd_adb_unpaired">尚未配对</string>
     <string name="vd_adb_pair_instructions">在开发者选项中打开「无线调试」，选择「使用配对码配对设备」。保持弹窗打开，下拉通知栏，在 AmberAgent 通知中输入配对码。</string>
+    <string name="vd_adb_waiting">正在等待配对服务。请在开发者选项中打开「无线调试」，点「使用配对码配对设备」。</string>
+    <string name="vd_adb_found">已发现配对服务（端口 %1$d）。保持系统弹窗打开，点下方「六位配对码」输入。</string>
+    <string name="vd_adb_cancel">停止等待</string>
+    <string name="vd_adb_success_connected">配对成功，辅助进程已连接。点此返回 Amber。</string>
+    <string name="vd_adb_success_disconnected">配对成功。点此返回 Amber，再点「连接辅助进程」。</string>
     <string name="vd_adb_go_pair">去无线调试配对</string>
     <string name="vd_adb_manual_pair">手动输入配对端口与配对码</string>
-    <string name="vd_adb_manual_pair_hint">填写系统配对弹窗内的端口和六位配对码。可用分屏让弹窗保持打开。</string>
+    <string name="vd_adb_manual_pair_hint">保持系统配对弹窗打开。可以直接下拉通知栏输入六位配对码，也可以用分屏或小窗在这里填写配对端口和配对码。</string>
     <string name="vd_adb_code">六位配对码</string>
     <string name="vd_adb_six_digits">请输入完整的六位配对码。</string>
     <string name="vd_adb_pair_port">配对端口</string>

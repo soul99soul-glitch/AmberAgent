@@ -140,11 +140,22 @@ class ProactiveDeepLinkTest {
     }
 
     @Test
+    fun `pairing notification brings Amber forward and opens phone automation settings without an active run`() {
+        val intent = phoneUseDisplaySettingsIntent(context)
+        assertEquals(RouteActivity::class.java.name, intent.component?.className)
+        assertTrue(intent.flags and Intent.FLAG_ACTIVITY_NEW_TASK != 0)
+        assertTrue(intent.flags and Intent.FLAG_ACTIVITY_SINGLE_TOP != 0)
+        assertTrue(intent.flags and Intent.FLAG_ACTIVITY_REORDER_TO_FRONT != 0)
+        assertEquals(Screen.SettingPhoneUseDisplay, phoneUseScreenFromIntent(intent))
+        assertNull(phoneUseScreenFromIntent(Intent(Intent.ACTION_MAIN)))
+    }
+
+    @Test
     fun `quick tile routes to PhoneUseLive when a virtual display run is active and PersonalAgent when idle`() {
         val idleIntent = AmberQuickTileService.buildLaunchIntent(context, activeRun = null)
         assertEquals(RouteActivity::class.java.name, idleIntent.component?.className)
         assertTrue(openPersonalAgentFromIntent(idleIntent))
-        assertNull(phoneUseLiveScreenFromIntent(idleIntent))
+        assertNull(phoneUseScreenFromIntent(idleIntent))
 
         val fakeSession = object : PhoneDisplaySession {
             override val mode: PhoneDisplayMode = PhoneDisplayMode.VIRTUAL
@@ -165,9 +176,9 @@ class ProactiveDeepLinkTest {
         val liveIntent = AmberQuickTileService.buildLaunchIntent(context, activeRun = activeRun)
         assertEquals(RouteActivity::class.java.name, liveIntent.component?.className)
         assertEquals(VirtualDisplayRunNotifier.ACTION_VIEW_VIRTUAL_RUN, liveIntent.action)
-        assertEquals(Screen.PhoneUseLive("vd_run_42"), phoneUseLiveScreenFromIntent(liveIntent))
+        assertEquals(Screen.PhoneUseLive("vd_run_42"), phoneUseScreenFromIntent(liveIntent))
         assertFalse(openPersonalAgentFromIntent(liveIntent))
         VirtualDisplayRunRegistry.unregister(activeRun.runId, activeRun)
-        assertNull(phoneUseLiveScreenFromIntent(liveIntent))
+        assertNull(phoneUseScreenFromIntent(liveIntent))
     }
 }

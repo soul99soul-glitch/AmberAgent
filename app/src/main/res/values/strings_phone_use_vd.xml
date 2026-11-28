@@ -52,9 +52,14 @@
     <string name="vd_adb_paired_desc">Turn on Wireless debugging and connect the helper.</string>
     <string name="vd_adb_unpaired">Not paired</string>
     <string name="vd_adb_pair_instructions">Open Wireless debugging in Developer options and select Pair device with pairing code. Keep the dialog open and enter the code in the AmberAgent notification.</string>
+    <string name="vd_adb_waiting">Waiting for a pairing service. In Developer options, open Wireless debugging and tap “Pair device with pairing code”.</string>
+    <string name="vd_adb_found">Pairing service found on port %1$d. Keep the system dialog open and use the reply action below to enter the six-digit code.</string>
+    <string name="vd_adb_cancel">Stop waiting</string>
+    <string name="vd_adb_success_connected">Pairing complete. The helper is connected. Tap to return to AmberAgent.</string>
+    <string name="vd_adb_success_disconnected">Pairing complete. Tap to return to AmberAgent and connect the helper.</string>
     <string name="vd_adb_go_pair">Pair in Wireless debugging</string>
     <string name="vd_adb_manual_pair">Enter pairing port and code</string>
-    <string name="vd_adb_manual_pair_hint">Use the port and six-digit code shown in the system pairing dialog. Keep the dialog visible in split screen.</string>
+    <string name="vd_adb_manual_pair_hint">Keep the system pairing dialog open. Enter its six-digit code in the AmberAgent notification, or use split screen to enter the pairing port and code here.</string>
     <string name="vd_adb_code">Six-digit pairing code</string>
     <string name="vd_adb_six_digits">Enter all six digits of the pairing code.</string>
     <string name="vd_adb_pair_port">Pairing port</string>

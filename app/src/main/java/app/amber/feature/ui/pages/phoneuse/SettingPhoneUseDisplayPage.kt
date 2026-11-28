@@ -347,7 +347,15 @@ private fun WirelessAdbSettingsCard(
     fun openPairingSettings() {
         try {
             if (WirelessAdbPairingNotification.show(context)) {
-                context.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
+                val settingsIntent = Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
+                try {
+                    context.startActivity(settingsIntent)
+                } catch (_: SecurityException) {
+                    // Some Settings implementations only allow the existing Settings task.
+                    settingsIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    context.startActivity(settingsIntent)
+                }
             } else {
                 feedback = R.string.vd_adb_permission_hint
                 dialog = AdbDialog.PAIR
