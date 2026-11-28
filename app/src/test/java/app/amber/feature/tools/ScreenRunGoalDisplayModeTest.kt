@@ -15,6 +15,9 @@ import android.view.MotionEvent
 import android.view.Surface
 import app.amber.agent.PHONE_USE_RUN_CHANNEL_ID
 import app.amber.agent.RouteActivity
+import app.amber.feature.runtime.AgentToolDispatcher
+import app.amber.feature.runtime.PermissionDecisionResolver
+import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessagePart
 import app.amber.core.automation.AccessibilityActive
 import app.amber.core.automation.AccessibilityController
@@ -367,6 +370,39 @@ class ScreenRunGoalDisplayModeTest {
     }
 
     @Test
+    fun approvedPhysicalAndUnattendedVirtualGoalsCanDispatchTwoBrowsingSteps() = runTest {
+        val pkg = "com.example.target"
+        val context = RecordingLaunchContext(baseContext, pkg)
+        val dispatcher = AgentToolDispatcher(Json, PermissionDecisionResolver())
+        val action = """{"model":"jev-test","answers":{"done":{"type":"noul","noul":0.1},"action":{"type":"choice","choice":"a0","confidence":0.99},"safe_a0":{"type":"noul","noul":0.99}}}"""
+        for (unattended in listOf(false, true)) {
+            val initial = targetSnapshot(pkg, "page-0")
+            lateinit var controller: FakeAccessibilityController
+            controller = FakeAccessibilityController(initial) {
+                initial.copy(id = "page-${controller.actions}", nodes = initial.nodes.map { it.copy(clickable = true) })
+            }
+            AccessibilityActive.activeController = controller
+            val runner = createRunner(mutableListOf(action, action, action, action, verifiedDoneResponse()))
+            val tools = ScreenAppScopeTools(
+                context, null, runner, ScreenOperationOwner(AgentToolActivityStore()),
+                virtualDisplayAllowedProvider = { true }, virtualDisplayEnabledProvider = { unattended },
+                probeCompatibilityProvider = { VirtualDisplayCompatibility.VERIFIED },
+                sessionOpener = { _, _, _ -> DisplaySessionOutcome.Ready(FakeVirtualPhoneDisplaySession(7, 1L, controller)) },
+            )
+            val tool = tools.screenGoalTool("run-browse")
+            val call = UIMessagePart.Tool(
+                toolCallId = "browse", toolName = tool.name,
+                input = """{"package_name":"$pkg","goal":"Read two pages","return_to_host":false,"ocr_mode":"off"}""",
+                approvalState = if (unattended) ToolApprovalState.Auto else ToolApprovalState.Approved,
+            )
+            val executed = dispatcher.execute(call, tool, autoApproveHighRiskTools = unattended)!!
+            val output = Json.parseToJsonElement((executed.output.single() as UIMessagePart.Text).text).jsonObject
+            assertEquals(output.toString(), "completed", output["status"]?.jsonPrimitive?.content)
+            assertEquals(2, controller.actions)
+        }
+    }
+
+    @Test
     fun virtualSessionDisconnectDuringRunReturnsSafePausedOrOutcomeUnknownWithoutReplay() = runTest {
         val targetPkg = "com.example.target"
         val recordingContext = RecordingLaunchContext(baseContext, targetPkg)
@@ -716,8 +752,13 @@ class ScreenRunGoalDisplayModeTest {
             return captureOverride?.invoke(captureCalls) ?: initial
         }
 
-        override fun performScreenAction(snapshot: ScreenSnapshot, action: ScreenAction): ScreenActionReceipt =
-            ScreenActionReceipt("ok", dispatched = true)
+        var actions = 0
+            private set
+
+        override fun performScreenAction(snapshot: ScreenSnapshot, action: ScreenAction): ScreenActionReceipt {
+            actions++
+            return ScreenActionReceipt("ok", dispatched = true)
+        }
 
         override fun returnToHostApp(hostPackageName: String): Boolean {
             hostReturnCalls++

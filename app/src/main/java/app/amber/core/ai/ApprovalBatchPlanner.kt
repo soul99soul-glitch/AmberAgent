@@ -1,5 +1,7 @@
 package app.amber.core.ai
 
+import app.amber.ai.core.MessageRole
+import app.amber.ai.ui.UIMessage
 import app.amber.ai.core.Tool
 import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessagePart
@@ -9,6 +11,7 @@ import app.amber.feature.runtime.PermissionDecision
 import app.amber.feature.runtime.PermissionDecisionAction
 import app.amber.feature.runtime.ToolInvocationContext
 import app.amber.feature.runtime.requiresIndividualScreenApproval
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -17,7 +20,29 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 /** PermissionDecisionResolver 中由自动批准开关放行的来源。 */
-private val AUTO_APPROVAL_SOURCES = setOf("settings", "settings_unattended")
+private val AUTO_APPROVAL_SOURCES = setOf("settings", "settings_unattended", "screen_run_grant")
+
+/** Rebuild from executed host receipts so an approval resume cannot lose or widen the grant. */
+internal fun approvedScreenPackagesForTurn(runId: String?, messages: List<UIMessage>): Set<String> {
+    if (runId.isNullOrBlank()) return emptySet()
+    return buildSet {
+        for (message in messages.drop(messages.indexOfLast { it.role == MessageRole.USER } + 1)) {
+            if (message.role != MessageRole.ASSISTANT) continue
+            for (tool in message.getTools()) {
+                if (tool.toolName != "screen_add_app" && tool.toolName != "screen_remove_app") continue
+                val pkg = ((tool.inputAsJson() as? JsonObject)?.get("package_name") as? JsonPrimitive)?.content ?: continue
+                if (tool.toolName == "screen_remove_app") {
+                    remove(pkg)
+                    continue
+                }
+                if (tool.approvalState != ToolApprovalState.Approved) continue
+                val text = (tool.output.singleOrNull() as? UIMessagePart.Text)?.text ?: continue
+                val receipt = runCatching { Json.parseToJsonElement(text) as? JsonObject }.getOrNull()
+                if (receipt?.get("run_id") == JsonPrimitive(runId) && receipt["package_name"] == JsonPrimitive(pkg)) add(pkg)
+            }
+        }
+    }
+}
 
 /** Plans approval patches; the kernel owns persistence, parking and dispatch. */
 internal class ApprovalBatchPlanner(
@@ -56,8 +81,8 @@ internal class ApprovalBatchPlanner(
                 initialPendingToolCallIds.isNotEmpty() &&
                 waitingTools.isNotEmpty() &&
                 waitingTools.all { it.toolCallId in initialPendingToolCallIds } &&
-                // Jev 复核收紧或默认 L3 无障碍代操作只能由用户逐步确认，不随高风险开关释放。
-                waitingTools.none { jevTightened(it) || it.requiresIndividualScreenApproval() }
+                // Re-evaluate direct calls under current policy; nested recipe checkpoints retain their own approval.
+                waitingTools.none { jevTightened(it) || (it.toolName.startsWith("recipe_") && it.requiresIndividualScreenApproval()) }
         val autoToolsToRecheck = buildList {
             if (pendingTools.isNotEmpty()) addAll(deferredAutoTools)
             if (canReleaseAllWaitingToolsWithHighRisk) {

@@ -1,5 +1,6 @@
 package app.amber.feature.tools
 
+import app.amber.feature.runtime.ApprovedScreenGoal
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -200,6 +201,7 @@ internal class ScreenAppScopeTools(
             textJson {
                 put("package_name", packageName)
                 put("allowed_packages", buildJsonArray { allowed.forEach { add(it) } })
+                if (runId != null) put("run_id", runId)
                 put("run_bound", runId != null)
             }
         },
@@ -301,9 +303,8 @@ internal class ScreenAppScopeTools(
 
     fun screenGoalTool(runId: String?) = Tool(
         name = "screen_run_goal",
-        description = "Open the approved package and use Jev to observe progress toward a goal. " +
-            "A proposed click, text entry or scroll is returned without dispatch. Request that step " +
-            "through an individual screen tool for approval, then observe again. Dry run never opens an app.",
+        description = "Use one bounded goal to open and browse the authorized app. Once approved, Jev can navigate, scroll " +
+            "and enter supplied search terms until completion or handback. Dry run never opens an app.",
         parameters = {
             InputSchema.Obj(properties = buildJsonObject {
                 put("package_name", screenStringProp("Android package to open and stay within, e.g. tv.danmaku.bili."))
@@ -316,7 +317,7 @@ internal class ScreenAppScopeTools(
                 put("max_steps", screenIntegerProp("Jev decision limit, default 15, hard maximum 30."))
                 put("max_duration_ms", screenIntegerProp("Deadline, default 180000ms, hard maximum 180000ms."))
                 put("dry_run", buildJsonObject { put("type", "boolean"); put("description", "Only inspect the currently open target app and judge; do not launch or execute actions.") })
-                put("return_to_host", buildJsonObject { put("type", "boolean"); put("description", "Legacy option; the target stays in front during individually approved steps.") })
+                put("return_to_host", buildJsonObject { put("type", "boolean"); put("description", "Return to the host after a physical-screen goal, subject to the runner settings.") })
                 put("ocr_mode", screenStringProp("On-device OCR mode: 'auto' (default, zero-overhead tree-first with low-coverage fallback), 'on' (force OCR), or 'off' (disable OCR)."))
                 put("include_ocr", buildJsonObject { put("type", "boolean"); put("description", "Optional boolean alias to explicitly enable or disable on-device OCR.") })
                 put("display_mode", screenStringProp("Target display mode: 'auto' (default), 'physical', or 'virtual'. 'auto' uses virtual only when allowed, enabled in settings, and verified on this device; 'virtual' fails closed with display_unavailable if unavailable and never falls back to physical."))
@@ -356,6 +357,8 @@ internal class ScreenAppScopeTools(
 
                 // Resolve display mode BEFORE requireScreenAccessibility() and BEFORE context.startActivity().
                 val requestedDisplayModeRaw = input.string("display_mode")?.trim()?.lowercase().orEmpty().ifEmpty { "auto" }
+                val proposeNextAction = currentCoroutineContext()[ApprovedScreenGoal.Key] == null &&
+                    settingsStore?.settingsFlow?.value?.agentRuntime?.autoApproveHighRiskToolCalls != true
                 val resolvedMode: PhoneDisplayMode = when (requestedDisplayModeRaw) {
                     "physical" -> PhoneDisplayMode.PHYSICAL
                     "auto" -> {
@@ -387,10 +390,10 @@ internal class ScreenAppScopeTools(
                         dryRun = dryRun,
                         ocrMode = ocrMode,
                         requestedModeRaw = requestedDisplayModeRaw,
+                        proposeNextAction = proposeNextAction,
                     )
                 }
 
-                // PHYSICAL path — strictly identical to prior production behavior.
                 val service = requireScreenAccessibility()
                 // The approval UI can have brought Amber to the front. Restore only the explicitly named app.
                 val alreadyOpen = if (!dryRun && runner.canExecute()) withContext(Dispatchers.Main.immediate) {
@@ -413,7 +416,7 @@ internal class ScreenAppScopeTools(
                     maxSteps = maxSteps,
                     maxDurationMs = maxDurationMs,
                     dryRun = dryRun,
-                    proposeNextAction = true,
+                    proposeNextAction = proposeNextAction,
                     hostPackageName = context.packageName,
                     autoReturnToHost = returnToHostOverride,
                     returnToHostLauncher = { hostPkg -> launchHostApp(service, hostPkg) },
@@ -435,6 +438,7 @@ internal class ScreenAppScopeTools(
         dryRun: Boolean,
         ocrMode: app.amber.core.automation.ScreenOcrMode,
         requestedModeRaw: String,
+        proposeNextAction: Boolean,
     ): List<UIMessagePart> {
         if (!virtualDisplayAllowedProvider()) {
             return displayUnavailableJson(packageName, requestedModeRaw, "virtual_display_disabled_by_build")
@@ -598,7 +602,7 @@ internal class ScreenAppScopeTools(
                             maxSteps = maxSteps,
                             maxDurationMs = maxDurationMs,
                             dryRun = dryRun,
-                            proposeNextAction = true,
+                            proposeNextAction = proposeNextAction,
                             hostPackageName = context.packageName,
                             autoReturnToHost = false,
                             returnToHostLauncher = null,

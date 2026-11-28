@@ -146,7 +146,7 @@ object AccessibilityApprovalSummaryFormatter {
         }
         "screen_add_app" -> {
             val pkg = args?.stringField("package_name") ?: "目标应用"
-            "将 $pkg 加入无障碍允许列表"
+            "将 $pkg 加入无障碍允许列表，并允许本轮对该应用执行浏览目标"
         }
         else -> "执行外部无障碍操作"
     }

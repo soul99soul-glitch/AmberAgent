@@ -173,7 +173,7 @@ class ChatApprovalActions(
         if (
             pendingTools.isEmpty() ||
             pendingTools.any { tool ->
-                tool.toolName == ASK_USER_TOOL_NAME || tool.requiresIndividualScreenApproval() ||
+                tool.toolName == ASK_USER_TOOL_NAME || (tool.toolName.startsWith("recipe_") && tool.requiresIndividualScreenApproval()) ||
                     // Jev 复核收紧的调用只能由用户逐个决定。
                     tool.metadata?.containsKey(app.amber.core.jev.JevAutoApprovalGate.METADATA_KEY) == true ||
                     tool.metadata?.containsKey(app.amber.core.jev.JevApprovalTriage.METADATA_KEY) == true ||

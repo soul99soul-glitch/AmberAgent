@@ -47,7 +47,8 @@ import app.amber.core.automation.AmberAccessibilityService
 import app.amber.core.automation.display.AmberDisplayUserService
 import app.amber.core.automation.display.EmbeddedAdbDisplayBridge
 import app.amber.core.automation.display.IsolationProbeMainActivity
-import app.amber.core.automation.display.PHONE_USE_VIRTUAL_DISPLAY_ENABLED_PREF
+import app.amber.core.automation.display.isPhoneUseVirtualDisplayEnabled
+import app.amber.core.automation.display.setPhoneUseVirtualDisplayEnabled
 import app.amber.core.automation.display.ShizukuDisplayBridge
 import app.amber.core.automation.display.VirtualDisplayCompatibility
 import app.amber.core.automation.display.VirtualDisplayProbeStore
@@ -62,7 +63,6 @@ import app.amber.feature.ui.components.ui.Switch
 import app.amber.feature.ui.components.ui.WorkspaceTopBar
 import app.amber.feature.ui.components.ui.workspaceColors
 import app.amber.feature.ui.context.LocalNavController
-import app.amber.feature.ui.hooks.rememberSharedPreferenceBoolean
 import app.amber.feature.ui.pages.setting.SettingCardGroup
 import app.amber.feature.ui.pages.setting.SettingPageHorizontalInset
 import app.amber.feature.ui.pages.setting.settingTwoLine
@@ -99,11 +99,7 @@ fun SettingPhoneUseDisplayPage() {
     }
     val shizukuRunning = remember(refreshTick) { shizukuBridge.isShizukuRunning() }
     val shizukuAuthorized = remember(refreshTick) { shizukuBridge.hasShizukuPermission() }
-    var virtualDisplayEnabled by rememberSharedPreferenceBoolean(
-        keyForBoolean = PHONE_USE_VIRTUAL_DISPLAY_ENABLED_PREF,
-        defaultValue = false,
-    )
-
+    val virtualDisplayEnabled = remember(refreshTick) { isPhoneUseVirtualDisplayEnabled(context) }
     val canEnableVirtualDisplay = BuildConfig.PHONE_USE_VIRTUAL_DISPLAY_ALLOWED &&
         compatibility == VirtualDisplayCompatibility.VERIFIED
 
@@ -316,10 +312,11 @@ fun SettingPhoneUseDisplayPage() {
                         trailingContent = {
                             Switch(
                                 checked = virtualDisplayEnabled && canEnableVirtualDisplay,
-                                enabled = canEnableVirtualDisplay || virtualDisplayEnabled,
+                                enabled = canEnableVirtualDisplay,
                                 onCheckedChange = { checked ->
                                     if (!checked || canEnableVirtualDisplay) {
-                                        virtualDisplayEnabled = checked
+                                        setPhoneUseVirtualDisplayEnabled(context, checked)
+                                        refreshTick++
                                     }
                                 },
                             )

@@ -25,6 +25,7 @@ data class CapabilityPermissionContext(
     val conversationId: String? = null,
     /** Process-local current run; intentionally not persisted as a policy key. */
     val sessionId: String? = null,
+    val approvedScreenPackages: Set<String> = emptySet(),
 )
 
 /** A sparse policy map addressed by one concrete scope and identifier. */

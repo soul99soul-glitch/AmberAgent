@@ -35,6 +35,11 @@ import app.amber.feature.tools.isAccessibilityL3ActionTool
 
 internal const val SCREEN_TARGET_PACKAGE = "accessibility_target_app"
 
+/** Present only while dispatching an authorized screen_run_goal. Never taken from model input. */
+internal object ApprovedScreenGoal : kotlin.coroutines.AbstractCoroutineContextElement(Key) {
+    object Key : kotlin.coroutines.CoroutineContext.Key<ApprovedScreenGoal>
+}
+
 private const val TAG = "AgentToolDispatcher"
 
 /** Ledger/event errorCategory for sandbox denials (distinct from approval_denied). */
@@ -123,6 +128,9 @@ class AgentToolDispatcher(
         tool = tool,
         autoApproveTools = autoApproveTools,
         autoApproveHighRiskTools = autoApproveHighRiskTools,
+        accessibilityDelegationGranted = (tool.toolName == "screen_run_goal" || tool.toolName == "screen_open_app") &&
+            ((tool.inputAsJson() as? JsonObject)?.get("package_name") as? JsonPrimitive)?.content in
+                permissionContext?.approvedScreenPackages.orEmpty(),
         autoApprovedToolNames = autoApprovedToolNames,
         invocationContext = invocationContext,
         capabilityPermissions = capabilityPermissions,
@@ -364,7 +372,9 @@ class AgentToolDispatcher(
 
             is ToolApprovalState.Pending -> null
 
-            else -> if (decision.action == PermissionDecisionAction.DENY) {
+            else -> if (decision.action == PermissionDecisionAction.ASK && isAccessibilityL3ActionTool(tool.toolName)) {
+                tracedTool.copy(approvalState = ToolApprovalState.Pending)
+            } else if (decision.action == PermissionDecisionAction.DENY) {
                 recordDeniedEffect(ledgerContext, tool)
                 tracedTool.copy(
                     output = listOf(
@@ -511,7 +521,11 @@ class AgentToolDispatcher(
                     tool = tool,
                     toolDef = resolved,
                     retrySetting = retrySetting,
-                    execute = { resolved.execute(executionArgs) },
+                    execute = {
+                        if (resolved.name == "screen_run_goal" && decision.action == PermissionDecisionAction.ALLOW) {
+                            kotlinx.coroutines.withContext(ApprovedScreenGoal) { resolved.execute(executionArgs) }
+                        } else resolved.execute(executionArgs)
+                    },
                 )
             }
             val executed = if (resolved.ledgerManaged) {

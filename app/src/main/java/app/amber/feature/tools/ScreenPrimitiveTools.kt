@@ -253,7 +253,7 @@ internal class ScreenPrimitiveTools(
 
     val screenReadUiTool = Tool(
         name = "screen_read_ui",
-        description = "Read the current Accessibility UI tree for screen reasoning (with automatic compiled on-device OCR fallback for low-coverage/WebView/Canvas screens). OCR uses bundled ML Kit text recognition for Chinese (Simplified/Traditional) and Latin/English; `ocr_source`/`ocr_outcome` in the result distinguish real bitmap OCR from Accessibility-only metadata. For a multi-step phone goal, first discover screen_run_goal: when enabled it uses Jev to propose the next action for individual approval. Use this raw tree tool for inspection or when that tool hands back.",
+        description = "Read the current Accessibility UI tree for screen reasoning (with automatic compiled on-device OCR fallback for low-coverage/WebView/Canvas screens). OCR uses bundled ML Kit text recognition for Chinese (Simplified/Traditional) and Latin/English; `ocr_source`/`ocr_outcome` in the result distinguish real bitmap OCR from Accessibility-only metadata. For a multi-step phone goal, first discover screen_run_goal: when enabled it uses Jev to execute approved browsing steps within the target app. Use this raw tree tool for inspection or when that tool hands back.",
         parameters = {
             InputSchema.Obj(
                 properties = buildJsonObject {

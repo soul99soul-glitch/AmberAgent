@@ -41,7 +41,7 @@ class AgentCapabilitySnapshotBuilder(
             """
 
             Screen automation:
-            - When Jev screen automation is enabled, prefer screen_run_goal for bounded user-requested screen goals. It proposes the next action from a fresh snapshot. Submit each click, text entry or scroll as an individually approved screen tool call.
+            - When Jev screen automation is enabled, prefer screen_run_goal for bounded user-requested screen goals. Give it the complete browsing goal and permitted search text in one call. After approval it can navigate and scroll from fresh snapshots until completion or handback.
             - Jev is a judgment service, not a JavaScript engine. If it is disabled or unavailable, use the individual screen tools and their normal permission gates.
             """.trimIndent()
         } else {

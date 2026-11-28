@@ -21,10 +21,11 @@ import java.util.UUID
 const val PHONE_USE_VIRTUAL_DISPLAY_ENABLED_PREF = "phone_use_virtual_display_enabled"
 private const val AMBER_PREFS_NAME = "amber_agent.preferences"
 
-fun isPhoneUseVirtualDisplayEnabled(context: Context): Boolean =
-    context.applicationContext
-        .getSharedPreferences(AMBER_PREFS_NAME, Context.MODE_PRIVATE)
-        .getBoolean(PHONE_USE_VIRTUAL_DISPLAY_ENABLED_PREF, false)
+fun isPhoneUseVirtualDisplayEnabled(context: Context): Boolean {
+    val prefs = context.applicationContext.getSharedPreferences(AMBER_PREFS_NAME, Context.MODE_PRIVATE)
+    if (prefs.contains(PHONE_USE_VIRTUAL_DISPLAY_ENABLED_PREF)) return prefs.getBoolean(PHONE_USE_VIRTUAL_DISPLAY_ENABLED_PREF, false)
+    return VirtualDisplayProbeStore(context).compatibility() == VirtualDisplayCompatibility.VERIFIED
+}
 
 fun setPhoneUseVirtualDisplayEnabled(context: Context, enabled: Boolean) {
     context.applicationContext

@@ -280,6 +280,14 @@ class PermissionDecisionResolver(
                 risk = if (policy.risk == ToolRisk.Normal) ToolRisk.Sensitive else policy.risk,
             )
         }
+        val capability = if (capabilityPermissions != null) toolDef.capability() else null
+        if (tool.approvalState == ToolApprovalState.Approved && isAccessibilityL3ActionTool(tool.toolName) && capability != null) {
+            val selected = capabilityPermissions?.policyFor(capability, permissionContext)
+            if (selected?.policy == CapabilityPolicy.DISABLED) {
+                capabilityPolicyScope = selected.scope
+                return decision(PermissionDecisionAction.DENY, localized.capabilityDisabled(capability.id, localized.scope(selected.scope)), "capability", policy)
+            }
+        }
         if (tool.approvalState !is ToolApprovalState.Auto) {
             return decision(PermissionDecisionAction.ALLOW, localized.userAlreadyDecided, "approval_state", policy)
         }
@@ -325,40 +333,27 @@ class PermissionDecisionResolver(
         // on). DISABLED/ASK policies preempt every auto-approval level; the
         // risk floor raises the effective risk of mapped tools so low-level
         // global switches can never bypass high-risk capabilities.
-        if (capabilityPermissions != null) {
-            val capability = toolDef.capability()
-            if (capability != null) {
-                val adjustment = adjustForCapability(
-                    capability = capability,
-                    policy = policy,
-                    state = capabilityPermissions,
-                    context = permissionContext,
-                    autoApproveHighRiskTools = autoApproveHighRiskTools,
-                    strings = localized,
-                )
-                capabilityPolicyScope = adjustment.scope
-                if (adjustment.hardDecision != null) {
-                    return decision(
-                        adjustment.hardDecision,
-                        adjustment.reason ?: localized.capabilityPolicyBlocked(capability.id),
-                        "capability",
-                        policy,
-                    )
-                }
-                policy = adjustment.adjusted
-            }
-        }
-        // Default L3 step-by-step confirmation guard for Android accessibility cross-app write
-        // actions: until a delegation ledger accumulates sufficient approval history, never
-        // silently skip explicit user confirmation (even under auto-approve or high-risk switches).
-        // Read-only screen observations (L1) are excluded and flow through unchanged.
-        if (isAccessibilityL3ActionTool(tool.toolName) && !accessibilityDelegationGranted) {
-            return decision(
-                PermissionDecisionAction.ASK,
-                "无障碍跨应用代操作默认按 L3 高风险逐步确认，每步执行前需您明确批准。",
-                "accessibility_l3_guard",
-                policy,
+        val scopedScreenGrant = accessibilityDelegationGranted && invocationContext == ToolInvocationContext.Normal &&
+            (tool.toolName == "screen_run_goal" || tool.toolName == "screen_open_app")
+        if (capabilityPermissions != null && capability != null) {
+            val adjustment = adjustForCapability(
+                capability = capability,
+                policy = policy,
+                state = capabilityPermissions,
+                context = permissionContext,
+                highRiskAuthorized = autoApproveHighRiskTools || scopedScreenGrant,
+                strings = localized,
             )
+            capabilityPolicyScope = adjustment.scope
+            if (adjustment.hardDecision != null) {
+                return decision(
+                    adjustment.hardDecision,
+                    adjustment.reason ?: localized.capabilityPolicyBlocked(capability.id),
+                    "capability",
+                    policy,
+                )
+            }
+            policy = adjustment.adjusted
         }
         // This switch is itself explicit consent for unattended execution;
         // it must not silently depend on the separate regular-tool switch.
@@ -367,6 +362,17 @@ class PermissionDecisionResolver(
                 PermissionDecisionAction.ALLOW,
                 localized.bothAutoApproval,
                 "settings_unattended",
+                policy,
+            )
+        }
+        if (isAccessibilityL3ActionTool(tool.toolName)) {
+            if (scopedScreenGrant) {
+                return decision(PermissionDecisionAction.ALLOW, localized.runTrust, "screen_run_grant", policy)
+            }
+            return decision(
+                PermissionDecisionAction.ASK,
+                "请确认本次无障碍代操作的目标应用和操作范围。",
+                "accessibility_l3_guard",
                 policy,
             )
         }
@@ -448,7 +454,7 @@ class PermissionDecisionResolver(
         policy: ToolInvocationPolicy,
         state: CapabilityPermissionState,
         context: CapabilityPermissionContext?,
-        autoApproveHighRiskTools: Boolean,
+        highRiskAuthorized: Boolean,
         strings: PermissionDecisionStrings,
     ): CapabilityAdjustment {
         val floor = capability.riskFloor
@@ -478,14 +484,14 @@ class PermissionDecisionResolver(
             )
 
             CapabilityPolicy.AUTO -> {
-                if ((policy.mandatoryApproval || policy.alwaysAsk) && !autoApproveHighRiskTools) {
+                if ((policy.mandatoryApproval || policy.alwaysAsk) && !highRiskAuthorized) {
                     CapabilityAdjustment(
                         PermissionDecisionAction.ASK,
                         strings.capabilityAutoMandatory(capability.id, strings.scope(selected.scope)),
                         adjusted,
                         selected.scope,
                     )
-                } else if (effectiveRisk == ToolRisk.High && !autoApproveHighRiskTools) {
+                } else if (effectiveRisk == ToolRisk.High && !highRiskAuthorized) {
                     CapabilityAdjustment(
                         PermissionDecisionAction.ASK,
                         strings.capabilityAutoHighRisk(capability.id, strings.scope(selected.scope)),

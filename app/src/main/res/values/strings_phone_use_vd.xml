@@ -87,10 +87,10 @@
     <string name="setting_phone_use_vd_probe_run_btn">Run self-test</string>
     <string name="setting_phone_use_vd_probe_last_result">Last result: %1$s</string>
 
-    <string name="setting_phone_use_vd_toggle_section">Experimental Mode</string>
-    <string name="setting_phone_use_vd_toggle_title">Enable Virtual Display Mode</string>
-    <string name="setting_phone_use_vd_toggle_desc_ready">When enabled, screen_run_goal in auto mode uses an isolated virtual display instead of the main screen.</string>
-    <string name="setting_phone_use_vd_toggle_desc_locked">Available only after this device passes the isolation self-test (Verified).</string>
+    <string name="setting_phone_use_vd_toggle_section">Default control mode</string>
+    <string name="setting_phone_use_vd_toggle_title">Prefer virtual display</string>
+    <string name="setting_phone_use_vd_toggle_desc_ready">Uses the isolated display in the background. Turn off to use the main screen.</string>
+    <string name="setting_phone_use_vd_toggle_desc_locked">Using the main screen. Passing the isolation test makes the virtual display available.</string>
 
     <string name="setting_phone_use_vd_active_run_section">Active Virtual Run</string>
     <string name="setting_phone_use_vd_active_run_open">Open live preview (%1$s)</string>

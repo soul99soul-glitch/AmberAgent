@@ -170,6 +170,9 @@ class DefaultRunKernel(
         )
 
         var messages: List<UIMessage> = session.messages
+        fun currentPermissions() = permissionContext.copy(
+            approvedScreenPackages = approvedScreenPackagesForTurn(runId, messages),
+        )
         val approvalPlanner = ApprovalBatchPlanner(
             autoApproveHighRiskTools = autoApproveHighRiskTools,
             invocationContext = invocationContext,
@@ -186,7 +189,7 @@ class DefaultRunKernel(
                     autoApprovedToolNames = autoApprovedToolNames,
                     invocationContext = invocationContext,
                     capabilityPermissions = capabilityState,
-                    permissionContext = permissionContext,
+                    permissionContext = currentPermissions(),
                 )
             },
         )
@@ -322,7 +325,7 @@ class DefaultRunKernel(
                     maxConcurrentTools = settings.speculativeToolExecution.maxConcurrentTools,
                     invocationContext = invocationContext,
                     capabilityPermissions = capabilityState,
-                    permissionContext = permissionContext,
+                    permissionContext = currentPermissions(),
                     executionPolicy = executionPolicy,
                 )
             } else {
@@ -778,7 +781,7 @@ class DefaultRunKernel(
                 approvalHistoryFor = { tool ->
                     capabilityPermissionStore.takeIf { capabilityState != null || tool.requiresIndividualScreenApproval() }
                 },
-                permissionContext = permissionContext,
+                permissionContext = currentPermissions(),
                 executionPolicy = executionPolicy,
                 shouldAbortRemaining = hasPendingSteer,
                 onToolStarted = { toolName ->

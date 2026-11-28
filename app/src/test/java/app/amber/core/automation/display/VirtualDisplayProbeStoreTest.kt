@@ -178,6 +178,20 @@ class VirtualDisplayProbeStoreTest {
         }
     }
 
+    @Test
+    fun verifiedDeviceDefaultsToVirtualButManualMainScreenChoiceSurvivesRetest() {
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        org.robolectric.Shadows.shadowOf(context.packageManager).setSystemFeature(
+            android.content.pm.PackageManager.FEATURE_ACTIVITIES_ON_SECONDARY_DISPLAYS, true)
+        val store = VirtualDisplayProbeStore(context)
+        assertEquals(false, isPhoneUseVirtualDisplayEnabled(context))
+        store.record(passingResult())
+        assertEquals(true, isPhoneUseVirtualDisplayEnabled(context))
+        setPhoneUseVirtualDisplayEnabled(context, false)
+        store.record(passingResult())
+        assertEquals(false, isPhoneUseVirtualDisplayEnabled(context))
+    }
+
     private fun passingResult() = IsolationProbeResult(
         passed = true,
         mainScreenInjectedEvents = 0,

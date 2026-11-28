@@ -1,5 +1,8 @@
 package app.amber.feature.runtime
 
+import app.amber.ai.core.MessageRole
+import app.amber.ai.ui.UIMessage
+import app.amber.core.ai.approvedScreenPackagesForTurn
 import app.amber.ai.core.Tool
 import app.amber.ai.ui.ToolApprovalState
 import app.amber.ai.ui.UIMessagePart
@@ -27,8 +30,7 @@ import org.junit.Test
 /**
  * Verifies the Council Resolution mandate for Android accessibility automation:
  * - Cross-app external write actions default to L3 risk and require explicit step-by-step
- *   user confirmation before every step (never silently bypassed by auto-approve, high-risk
- *   auto-approve, run_trust, or CapabilityPolicy.AUTO).
+ *   confirmation unless unattended execution or a scoped target grant is active.
  * - Read-only screen observations and screenshots stay L1 and are not intercepted by the L3 guard.
  * - Approval preview clearly shows L3 risk, target app, action type, and operation summary.
  */
@@ -98,8 +100,7 @@ class AccessibilityL3GuardTest {
             assertTrue("$toolName must be alwaysAsk", policy.alwaysAsk)
             assertFalse("$toolName must not be autoApprovable", policy.autoApprovable)
 
-            // Even with ALL auto-approve switches, run_trust from step 1, and capability AUTO,
-            // every step must still ASK until delegation ledger grants authority.
+            // High-risk approval is independently sufficient; ordinary approval alone is not.
             val decision = resolver.resolve(
                 toolDef = def,
                 tool = toolCall(toolName),
@@ -108,8 +109,11 @@ class AccessibilityL3GuardTest {
                 autoApprovedToolNames = setOf(toolName),
                 capabilityPermissions = permissiveCapabilityState,
             )
-            assertEquals("$toolName must require explicit step confirmation", PermissionDecisionAction.ASK, decision.action)
-            assertEquals("accessibility_l3_guard", decision.source)
+            assertEquals(PermissionDecisionAction.ALLOW, decision.action)
+            assertEquals("settings_unattended", decision.source)
+            val ordinary = resolver.resolve(def, toolCall(toolName), autoApproveTools = true, autoApproveHighRiskTools = false)
+            assertEquals(PermissionDecisionAction.ASK, ordinary.action)
+            assertEquals("accessibility_l3_guard", ordinary.source)
             assertEquals(
                 "L3",
                 decision.trace.toJson()["policy"]!!.jsonObject["risk_level"]?.jsonPrimitive?.content,
@@ -130,6 +134,34 @@ class AccessibilityL3GuardTest {
                 AgentLiveStatusNotifier.requiresInAppApprovalOnly(toolCall(toolName)),
             )
         }
+    }
+
+    @Test
+    fun approvedAppReceiptDelegatesOnlyTheSameRunTurnAndPackage() {
+        val args = """{"package_name":"com.example.feed"}"""
+        val add = toolCall("screen_add_app", args, ToolApprovalState.Approved).copy(
+            output = listOf(UIMessagePart.Text("""{"package_name":"com.example.feed","run_id":"r1"}""")),
+        )
+        val message = UIMessage(role = MessageRole.ASSISTANT, parts = listOf(add))
+        val grants = approvedScreenPackagesForTurn("r1", listOf(message))
+        assertEquals(setOf("com.example.feed"), grants)
+        assertTrue(approvedScreenPackagesForTurn("r2", listOf(message)).isEmpty())
+        assertTrue(approvedScreenPackagesForTurn("r1", listOf(message, UIMessage(role = MessageRole.USER, parts = emptyList()))).isEmpty())
+        assertTrue(approvedScreenPackagesForTurn("r1", listOf(message.copy(parts = listOf(add, toolCall("screen_remove_app", args))))).isEmpty())
+        assertTrue(approvedScreenPackagesForTurn("r1", listOf(message.copy(parts = listOf(add.copy(output = emptyList()))))).isEmpty())
+        val dispatcher = AgentToolDispatcher(Json, resolver)
+        fun action(name: String, input: String, policy: CapabilityPolicy? = null) = dispatcher.resolveDecision(
+            toolDef(name, true), toolCall(name, input), autoApproveTools = false,
+            capabilityPermissions = policy?.let { CapabilityPermissionState(policies = mapOf(Capability.SCREEN_AUTOMATION to it)) },
+            permissionContext = CapabilityPermissionContext(sessionId = "r1", approvedScreenPackages = grants),
+        ).action
+        assertEquals(PermissionDecisionAction.ALLOW, action("screen_run_goal", args))
+        assertEquals(PermissionDecisionAction.ALLOW, action("screen_run_goal", args, CapabilityPolicy.AUTO))
+        assertEquals(PermissionDecisionAction.ASK, action("screen_run_goal", args, CapabilityPolicy.ASK))
+        assertEquals(PermissionDecisionAction.DENY, action("screen_run_goal", args, CapabilityPolicy.DISABLED))
+        assertEquals(PermissionDecisionAction.ALLOW, action("screen_open_app", args))
+        assertEquals(PermissionDecisionAction.ASK, action("screen_run_goal", """{"package_name":"another.app"}"""))
+        assertEquals(PermissionDecisionAction.ASK, action("screen_add_app", args))
     }
 
     @Test

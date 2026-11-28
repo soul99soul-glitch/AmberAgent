@@ -87,10 +87,10 @@
     <string name="setting_phone_use_vd_probe_run_btn">开始自测</string>
     <string name="setting_phone_use_vd_probe_last_result">最近结果：%1$s</string>
 
-    <string name="setting_phone_use_vd_toggle_section">实验开关</string>
-    <string name="setting_phone_use_vd_toggle_title">启用虚拟屏模式</string>
-    <string name="setting_phone_use_vd_toggle_desc_ready">开启后，screen_run_goal 在 auto 模式下会优先使用隔离虚拟屏运行。</string>
-    <string name="setting_phone_use_vd_toggle_desc_locked">仅在本机通过隔离自测（已验证）后方可开启。</string>
+    <string name="setting_phone_use_vd_toggle_section">默认操控模式</string>
+    <string name="setting_phone_use_vd_toggle_title">优先使用虚拟屏</string>
+    <string name="setting_phone_use_vd_toggle_desc_ready">在独立虚拟屏后台运行。关闭后使用主屏操控。</string>
+    <string name="setting_phone_use_vd_toggle_desc_locked">当前使用主屏。通过双屏隔离自测后，可使用虚拟屏。</string>
 
     <string name="setting_phone_use_vd_active_run_section">活跃虚拟屏任务</string>
     <string name="setting_phone_use_vd_active_run_open">查看实时预览（%1$s）</string>

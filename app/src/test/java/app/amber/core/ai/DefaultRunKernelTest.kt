@@ -1245,7 +1245,7 @@ class DefaultRunKernelTest : DurableRuntimeTestBase() {
     }
 
     @Test
-    fun `unapproved screen automation action parks for L3 confirmation even with high-risk auto-approve`() = runTest {
+    fun `screen action parks by default and executes when high-risk auto-approval is enabled`() = runTest {
         val executions = AtomicInteger(0)
         val click = Tool(
             name = "screen_click",
@@ -1257,25 +1257,26 @@ class DefaultRunKernelTest : DurableRuntimeTestBase() {
                 listOf(UIMessagePart.Text("clicked"))
             },
         )
-        val engine = FakeRoundEngine(
-            listOf(
-                { toolCallAssistant("call_1", "screen_click") },
-            ),
-        )
-        val terminals = mutableListOf<GenerationTerminal>()
-
-        val chunks = kernel(engine).run(
-            session(
-                messages = listOf(UIMessage.user("帮我点一下")),
-                tools = listOf(click),
-                terminals = terminals,
-                autoApproveHighRiskTools = true,
-            ),
-        ).toList()
-
-        assertEquals("must not execute before explicit L3 confirmation", 0, executions.get())
-        val parkedTool = lastMessages(chunks).last().getTools().single()
-        assertEquals(ToolApprovalState.Pending, parkedTool.approvalState)
+        for (unattended in listOf(false, true)) {
+            val engine = FakeRoundEngine(
+                listOf({ toolCallAssistant("call_1", "screen_click") }, { textAssistant("完成") }),
+            )
+            val chunks = kernel(engine).run(
+                session(
+                    messages = listOf(UIMessage.user("帮我点一下")),
+                    tools = listOf(click),
+                    terminals = mutableListOf(),
+                    autoApproveHighRiskTools = unattended,
+                ),
+            ).toList()
+            if (unattended) {
+                assertEquals(1, executions.get())
+                assertEquals(2, engine.requests.size)
+            } else {
+                assertEquals(0, executions.get())
+                assertEquals(ToolApprovalState.Pending, lastMessages(chunks).last().getTools().single().approvalState)
+            }
+        }
     }
 
     @Test
