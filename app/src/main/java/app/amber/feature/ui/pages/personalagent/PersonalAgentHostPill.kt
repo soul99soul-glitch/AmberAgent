@@ -54,7 +54,7 @@ import com.composables.icons.lucide.Smartphone
 
 /**
  * Bottom-right `+1` host switcher pill aligned with iOS & HarmonyOS Amber Duet:
- * - Compact 40dp capsule showing `[phone/cloud icon] 本机 •` / `[cloud icon] 云端 •` (no chevron)
+ * - Compact 34dp capsule showing `[phone/cloud icon] 本机 •` / `[cloud icon] 云端 •` (no chevron)
  * Tap toggles the only paired host or opens the menu when both are available.
  */
 @OptIn(ExperimentalFoundationApi::class)
@@ -84,7 +84,7 @@ fun PersonalAgentHostPill(
     Box(modifier = modifier) {
         Row(
             modifier = Modifier
-                .height(40.dp)
+                .height(34.dp)
                 .amberGlass(CircleShape, AmberGlassRole.Control, highlighted = remoteSelected)
                 .testTag("personal-agent-host-pill")
                 .combinedClickable(
@@ -101,9 +101,9 @@ fun PersonalAgentHostPill(
                     onLongClick = { expanded = true },
                 )
                 .semantics { contentDescription = switchA11y }
-                .padding(horizontal = 13.dp),
+                .padding(horizontal = 11.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
         ) {
             Icon(
                 imageVector = when (selectedRole) {
@@ -113,20 +113,20 @@ fun PersonalAgentHostPill(
                 },
                 contentDescription = null,
                 tint = if (remoteSelected) tokens.accent else tokens.ink2,
-                modifier = Modifier.size(15.dp),
+                modifier = Modifier.size(14.dp),
             )
             Text(
                 text = activeLabel,
                 color = if (remoteSelected) tokens.ink else tokens.ink2,
-                fontSize = 13.sp,
-                lineHeight = 16.sp,
+                fontSize = 12.5.sp,
+                lineHeight = 15.sp,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Box(
                 modifier = Modifier
-                    .size(6.dp)
+                    .size(5.5.dp)
                     .clip(CircleShape)
                     .background(dotColor),
             )

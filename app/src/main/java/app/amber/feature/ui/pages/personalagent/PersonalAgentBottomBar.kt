@@ -113,14 +113,14 @@ fun PersonalAgentBottomBar(
         modifier = modifier
             .fillMaxWidth()
             .testTag("personal-agent-bottom-bar")
-            .padding(top = 10.dp),
+            .padding(top = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         // Left: 3-segment track well with tap + horizontal scrub
         Row(
             modifier = Modifier
-                .height(40.dp)
+                .height(34.dp)
                 .amberGlass(CircleShape, AmberGlassRole.Well)
                 .pointerInput(Unit) {
                     detectHorizontalDragGestures { change, _ ->
@@ -139,7 +139,7 @@ fun PersonalAgentBottomBar(
                         }
                     }
                 }
-                .padding(4.dp),
+                .padding(3.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {
@@ -222,37 +222,37 @@ private fun ModeSegmentButton(
 
     Row(
         modifier = modifier
-            .height(32.dp)
+            .height(28.dp)
             .amberGlass(CircleShape, AmberGlassRole.Lens, presence = lensPresence)
             .semantics { this.selected = selected }
             .selectable(selected = selected, role = Role.Tab, onClick = onClick)
-            .padding(horizontal = if (badgeCount > 0) 12.dp else 14.dp),
+            .padding(horizontal = if (badgeCount > 0) 11.dp else 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         Text(
             text = label,
             color = animatedTextColor,
-            fontSize = 13.sp,
-            lineHeight = 16.sp,
+            fontSize = 12.5.sp,
+            lineHeight = 15.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
             maxLines = 1,
         )
         if (badgeCount > 0) {
             Box(
                 modifier = Modifier
-                    .heightIn(min = 17.dp)
-                    .widthIn(min = 17.dp)
+                    .heightIn(min = 15.dp)
+                    .widthIn(min = 15.dp)
                     .clip(CircleShape)
                     .background(tokens.accent)
-                    .padding(horizontal = 5.dp, vertical = 1.dp),
+                    .padding(horizontal = 4.5.dp, vertical = 1.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     text = if (badgeCount > 99) "99+" else badgeCount.toString(),
                     color = tokens.accentInk,
-                    fontSize = 10.sp,
-                    lineHeight = 12.sp,
+                    fontSize = 9.5.sp,
+                    lineHeight = 11.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
                 )

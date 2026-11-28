@@ -291,6 +291,14 @@ class PersonalAgentShellOverlayTest {
         // Tapping the active Center tab collapses back to Chat.
         compose.onNodeWithTag("personal-agent-tab-center").performClick()
         compose.onNodeWithTag("personal-agent-tab-chat").assertIsSelected()
+
+        // Verify compact 34dp capsules (28dp segment pills + 3dp track padding) and 8dp bar top padding.
+        val tabBounds = compose.onNodeWithTag("personal-agent-tab-chat").getUnclippedBoundsInRoot()
+        val hostBounds = compose.onNodeWithTag("personal-agent-host-pill").getUnclippedBoundsInRoot()
+        val barBounds = compose.onNodeWithTag("personal-agent-bottom-bar").getUnclippedBoundsInRoot()
+        assertTrue("expected 28dp tab pill, got ${tabBounds.height}", abs(tabBounds.height.value - 28f) <= 1f)
+        assertTrue("expected 34dp host pill, got ${hostBounds.height}", abs(hostBounds.height.value - 34f) <= 1f)
+        assertTrue("expected 42dp bar (8dp top + 34dp pills), got ${barBounds.height}", abs(barBounds.height.value - 42f) <= 1f)
     }
 
     @Test
