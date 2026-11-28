@@ -168,6 +168,13 @@ internal fun MessagePartsBlock(
             is MessagePartBlock.ThinkingBlock -> {
                 if (block.steps.isNotEmpty()) {
                     val isReasoningOnlyBlock = block.steps.fastAll { it is ThinkingStep.ReasoningStep }
+                    val isPersonalAgentStage =
+                        app.amber.feature.ui.pages.chat.LocalChatStageMode.current is
+                            app.amber.feature.ui.pages.chat.ChatStageMode.PersonalAgent
+                    val useCompactToolCard = shouldUseCompactToolRunCard(
+                        steps = block.steps,
+                        isPersonalAgentStage = isPersonalAgentStage,
+                    )
                     val themeTryOnTool = themeTryOnCardTarget?.let { target ->
                         block.steps.asSequence().flatMap { step ->
                             when (step) {
@@ -185,65 +192,124 @@ internal fun MessagePartsBlock(
                     // motion is preserved. Removing the outer Card-level spring is the
                     // free win — it stacked on top of the inner one with no added value.
                     AmberTraceSection("Amber chain of thought") {
-                    ChainOfThought(
-                        steps = block.steps,
-                        collapsedAdaptiveWidth = isReasoningOnlyBlock,
-                        animateContentChanges = loading,
-                        // V3: wrapper 不画 timeline. 改由 ReasoningContent 内部自带 quote
-                        // line, 这样 reasoning step 有竖线、tool call step 没竖线 (符合
-                        // 语义 — tool 是平级独立调用, 不该被串起来).
-                        drawTimeline = false,
-                    ) { step ->
-                        when (step) {
-                            is ThinkingStep.ReasoningStep -> {
-                                AmberTraceSection("Amber reasoning step") {
-                                key(step.reasoning.createdAt) {
-                                    ChatMessageReasoningStep(
-                                        reasoning = step.reasoning,
-                                        model = model,
-                                        regexes = regexes,
-                                        loading = loading,
-                                        framed = true,
-                                        collapsedAdaptiveWidth = isReasoningOnlyBlock,
-                                    )
-                                }
+                    if (useCompactToolCard) {
+                        val nonToolSteps = block.steps.filterNot { it is ThinkingStep.ToolStep }
+                        val toolSteps = block.steps.filterIsInstance<ThinkingStep.ToolStep>()
+                        if (nonToolSteps.isNotEmpty()) {
+                            val nonToolReasoningOnly = nonToolSteps.fastAll { it is ThinkingStep.ReasoningStep }
+                            ChainOfThought(
+                                steps = nonToolSteps,
+                                collapsedAdaptiveWidth = nonToolReasoningOnly,
+                                animateContentChanges = loading,
+                                drawTimeline = false,
+                            ) { step ->
+                                when (step) {
+                                    is ThinkingStep.ReasoningStep -> {
+                                        AmberTraceSection("Amber reasoning step") {
+                                        key(step.reasoning.createdAt) {
+                                            ChatMessageReasoningStep(
+                                                reasoning = step.reasoning,
+                                                model = model,
+                                                regexes = regexes,
+                                                loading = loading,
+                                                framed = true,
+                                                collapsedAdaptiveWidth = nonToolReasoningOnly,
+                                            )
+                                        }
+                                        }
+                                    }
+
+                                    is ThinkingStep.SubAgentTaskStep -> {
+                                        key(step.runId) {
+                                            SubAgentTaskStepView(
+                                                step = step,
+                                                loading = loading,
+                                            )
+                                        }
+                                    }
+
+                                    is ThinkingStep.CouncilTaskStep -> {
+                                        key(step.runId) {
+                                            CouncilTaskStepView(
+                                                step = step,
+                                                loading = loading,
+                                            )
+                                        }
+                                    }
+
+                                    is ThinkingStep.ToolStep -> Unit
                                 }
                             }
-
-                            is ThinkingStep.ToolStep -> {
-                                AmberTraceSection("Amber tool step ${step.tool.toolName}") {
-                                key(step.tool.stableStepKey()) {
-                                    ChatMessageToolStep(
-                                        tool = step.tool,
-                                        loading = loading && !step.tool.isExecuted,
-                                        onToolApproval = onToolApproval,
-                                        onToolAnswer = onToolAnswer,
-                                        onOpenWorkspaceFile = onOpenWorkspaceFile,
-                                        themeTryOnCardTarget = themeTryOnCardTarget,
-                                    )
+                        }
+                        CompactToolRunCard(
+                            toolSteps = toolSteps,
+                            loading = loading,
+                            onToolApproval = onToolApproval,
+                            onToolAnswer = onToolAnswer,
+                            onOpenWorkspaceFile = onOpenWorkspaceFile,
+                            themeTryOnCardTarget = themeTryOnCardTarget,
+                        )
+                    } else {
+                        ChainOfThought(
+                            steps = block.steps,
+                            collapsedAdaptiveWidth = isReasoningOnlyBlock,
+                            animateContentChanges = loading,
+                            // V3: wrapper 不画 timeline. 改由 ReasoningContent 内部自带 quote
+                            // line, 这样 reasoning step 有竖线、tool call step 没竖线 (符合
+                            // 语义 — tool 是平级独立调用, 不该被串起来).
+                            drawTimeline = false,
+                        ) { step ->
+                            when (step) {
+                                is ThinkingStep.ReasoningStep -> {
+                                    AmberTraceSection("Amber reasoning step") {
+                                    key(step.reasoning.createdAt) {
+                                        ChatMessageReasoningStep(
+                                            reasoning = step.reasoning,
+                                            model = model,
+                                            regexes = regexes,
+                                            loading = loading,
+                                            framed = true,
+                                            collapsedAdaptiveWidth = isReasoningOnlyBlock,
+                                        )
+                                    }
+                                    }
                                 }
-                                }
-                            }
 
-                            is ThinkingStep.SubAgentTaskStep -> {
-                                key(step.runId) {
-                                    SubAgentTaskStepView(
-                                        step = step,
-                                        loading = loading,
-                                    )
+                                is ThinkingStep.ToolStep -> {
+                                    AmberTraceSection("Amber tool step ${step.tool.toolName}") {
+                                    key(step.tool.stableStepKey()) {
+                                        ChatMessageToolStep(
+                                            tool = step.tool,
+                                            loading = loading && !step.tool.isExecuted,
+                                            onToolApproval = onToolApproval,
+                                            onToolAnswer = onToolAnswer,
+                                            onOpenWorkspaceFile = onOpenWorkspaceFile,
+                                            themeTryOnCardTarget = themeTryOnCardTarget,
+                                        )
+                                    }
+                                    }
                                 }
-                            }
 
-                            is ThinkingStep.CouncilTaskStep -> {
-                                // Council steps are normally lifted to top-level CouncilBlock by
-                                // groupMessageParts. This branch only fires if a council task slips
-                                // into a ThinkingBlock somehow (e.g. fan-out re-render path) — render
-                                // the same card so nothing is lost.
-                                key(step.runId) {
-                                    CouncilTaskStepView(
-                                        step = step,
-                                        loading = loading,
-                                    )
+                                is ThinkingStep.SubAgentTaskStep -> {
+                                    key(step.runId) {
+                                        SubAgentTaskStepView(
+                                            step = step,
+                                            loading = loading,
+                                        )
+                                    }
+                                }
+
+                                is ThinkingStep.CouncilTaskStep -> {
+                                    // Council steps are normally lifted to top-level CouncilBlock by
+                                    // groupMessageParts. This branch only fires if a council task slips
+                                    // into a ThinkingBlock somehow (e.g. fan-out re-render path) — render
+                                    // the same card so nothing is lost.
+                                    key(step.runId) {
+                                        CouncilTaskStepView(
+                                            step = step,
+                                            loading = loading,
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -784,7 +850,7 @@ private fun List<MessagePartBlock>.stableContentBlockKeys(): List<String?> {
  * stream tool index (参数流式增长时不再每个 chunk 换 key); 两者都缺时才退回
  * hashCode (含 input, 每 chunk 都变, 仅作最后兜底)。
  */
-private fun UIMessagePart.Tool.stableStepKey(): String =
+internal fun UIMessagePart.Tool.stableStepKey(): String =
     toolCallId.ifBlank {
         streamToolIndex()?.let { "stream-tool-$it" } ?: hashCode().toString()
     }

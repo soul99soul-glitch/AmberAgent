@@ -30,6 +30,7 @@ import app.amber.feature.ui.components.ds.amberCanvas
 import app.amber.feature.ui.context.LocalNavController
 import app.amber.feature.ui.pages.chat.ChatPage
 import app.amber.feature.ui.pages.chat.ChatStageMode
+import app.amber.feature.ui.pages.phoneuse.VirtualDisplayMiniWindowOverlay
 import app.amber.feature.ui.pages.proactive.LocalProactiveCardDetailOpener
 import app.amber.feature.ui.pages.proactive.ProactiveDetailSheet
 import kotlinx.coroutines.flow.combine
@@ -251,6 +252,14 @@ fun PersonalAgentPage(
                     }
                 },
                 bottomBar = renderBottomBar,
+            )
+
+            VirtualDisplayMiniWindowOverlay(
+                onOpenLive = { runId ->
+                    navController.navigate(Screen.PhoneUseLive(runId)) {
+                        launchSingleTop = true
+                    }
+                },
             )
         }
 

@@ -192,9 +192,9 @@ fun ChainOfThoughtScope.ChatMessageToolStep(
             )
         }
 
-        if (screenReceipt != null && !isDenied && !isPending) {
+        if (shouldShowInlineScreenToolReceipt(tool.toolName, screenReceipt) && !isDenied && !isPending) {
             ScreenToolReceiptInlineSummary(
-                receipt = screenReceipt,
+                receipt = screenReceipt!!,
                 onClick = { showResult = true },
             )
         }
@@ -474,4 +474,21 @@ private fun jevScriptJudgmentNotice(tool: UIMessagePart.Tool): String? {
         else -> return null
     }
     return stringResource(res)
+}
+
+private val MultiStepScreenReceiptTools = setOf("screen_run_goal", "screen_run_flow")
+
+/**
+ * Suppresses redundant inline "verified" receipt cards for ordinary single-step or read-only
+ * screen preparation tools (`screen_status`, `screen_apps`, `screen_add_app`, `screen_read_ui`,
+ * etc.) while preserving inline receipts for multi-step execution tools (`screen_run_goal`,
+ * `screen_run_flow`) and any failed / held-for-user / attention-requiring outcome.
+ */
+internal fun shouldShowInlineScreenToolReceipt(
+    toolName: String,
+    receipt: ScreenToolReceiptModel?,
+): Boolean {
+    if (receipt == null) return false
+    if (receipt.tier != ScreenReceiptTier.VERIFIED_COMPLETED) return true
+    return toolName in MultiStepScreenReceiptTools
 }
