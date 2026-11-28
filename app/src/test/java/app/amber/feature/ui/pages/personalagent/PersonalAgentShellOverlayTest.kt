@@ -32,7 +32,9 @@ import app.amber.feature.ui.theme.AmberBase
 import app.amber.feature.ui.theme.LocalAmberTokens
 import app.amber.feature.ui.theme.buildAmberTokens
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
@@ -431,5 +433,81 @@ class PersonalAgentShellOverlayTest {
                 isStreaming = false,
             ),
         )
+    }
+
+    @Test
+    fun modeSheetOverlay_latchesContentAndKeepsBottomDockStationaryDuringExit() {
+        assertEquals(
+            PersonalAgentModeTab.TASKS,
+            resolveModeSheetRenderedTab(PersonalAgentModeTab.CHAT, PersonalAgentModeTab.TASKS),
+        )
+        assertEquals(
+            PersonalAgentModeTab.CENTER,
+            resolveModeSheetRenderedTab(PersonalAgentModeTab.CHAT, PersonalAgentModeTab.CENTER),
+        )
+        assertEquals(
+            PersonalAgentModeTab.CENTER,
+            resolveModeSheetRenderedTab(PersonalAgentModeTab.CENTER, PersonalAgentModeTab.TASKS),
+        )
+        assertTrue(ModeSheetExitFadeDurationMs >= 180)
+        assertTrue(ModeSheetExitSlideDurationMs >= ModeSheetExitFadeDurationMs)
+
+        var activeTab by mutableStateOf(PersonalAgentModeTab.TASKS)
+        compose.setContent {
+            PersonalAgentModeSheetOverlay(
+                activeTab = activeTab,
+                onSelectTab = { activeTab = it },
+                onOpenTaskSettings = {},
+                bottomBar = {
+                    PersonalAgentBottomBar(
+                        selectedTab = activeTab,
+                        activeTaskCount = 1,
+                        selectedRole = null,
+                        cloud = MacGatewayRepository.State(loaded = true),
+                        mac = MacGatewayRepository.State(loaded = true),
+                        onSelectChat = { activeTab = PersonalAgentModeTab.CHAT },
+                        onOpenTasks = { activeTab = nextModeTabOnTap(activeTab, PersonalAgentModeTab.TASKS) },
+                        onOpenCenter = { activeTab = nextModeTabOnTap(activeTab, PersonalAgentModeTab.CENTER) },
+                        onSelectHost = {},
+                        onOpenGatewayPairing = {},
+                    )
+                },
+                panelBodyContent = { tab ->
+                    androidx.compose.material3.Text(
+                        text = "panel-${tab.name}",
+                        modifier = Modifier.testTag("mode-sheet-test-body-${tab.name}"),
+                    )
+                },
+            )
+        }
+
+        compose.waitForIdle()
+        compose.onNodeWithText("panel-TASKS").assertIsDisplayed()
+        val openSheetBounds = compose.onNodeWithTag("personal-agent-mode-sheet").getUnclippedBoundsInRoot()
+        val openDockBounds = compose.onNodeWithTag("personal-agent-mode-sheet-bottom-dock").getUnclippedBoundsInRoot()
+
+        // Pause clock and trigger dismiss via real close button click -> step frame-by-frame
+        // into mid-exit (~112ms) so Transition starts and visibly slides the sheet downward
+        // while keeping TASKS content latched and the bottom dock stationary.
+        compose.mainClock.autoAdvance = false
+        compose.onNodeWithTag("personal-agent-mode-sheet-close").performClick()
+        repeat(9) { compose.mainClock.advanceTimeByFrame() }
+        compose.waitForIdle()
+
+        compose.onNodeWithText("panel-TASKS").assertIsDisplayed()
+        compose.onNodeWithTag("personal-agent-mode-sheet").assertIsDisplayed()
+        val midExitDockBounds = compose.onNodeWithTag("personal-agent-mode-sheet-bottom-dock").getUnclippedBoundsInRoot()
+        assertEquals(PersonalAgentModeTab.CHAT, activeTab)
+        assertTrue(
+            "expected bottom dock to stay stationary at y=0 (open=${openDockBounds.top}, mid=${midExitDockBounds.top})",
+            abs(midExitDockBounds.top.value - openDockBounds.top.value) <= 1f,
+        )
+
+        // Let exit complete cleanly.
+        compose.mainClock.autoAdvance = true
+        compose.waitForIdle()
+        compose.onNodeWithTag("personal-agent-mode-sheet").assertDoesNotExist()
+        compose.onNodeWithTag("personal-agent-mode-sheet-bottom-dock").assertDoesNotExist()
+        compose.onNodeWithText("panel-TASKS").assertDoesNotExist()
     }
 }

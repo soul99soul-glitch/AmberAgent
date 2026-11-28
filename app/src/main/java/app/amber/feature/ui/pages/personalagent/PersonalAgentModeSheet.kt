@@ -47,8 +47,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import app.amber.feature.ui.components.ds.AmberGlassRole
@@ -56,6 +59,7 @@ import app.amber.feature.ui.components.ds.amberGlass
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -90,14 +94,29 @@ import org.koin.androidx.compose.koinViewModel
 import org.koin.compose.koinInject
 import kotlin.math.roundToInt
 
-private val ModeSheetEasing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
+internal val ModeSheetEnterEasing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
+internal val ModeSheetExitEasing = CubicBezierEasing(0.32f, 0f, 0.67f, 0f)
+internal const val ModeSheetEnterSlideDurationMs = 280
+internal const val ModeSheetEnterFadeDurationMs = 180
+internal const val ModeSheetExitSlideDurationMs = 220
+internal const val ModeSheetExitFadeDurationMs = 200
+internal const val ModeSheetSlideFraction = 0.35f
+
+internal fun resolveModeSheetRenderedTab(
+    activeTab: PersonalAgentModeTab,
+    previousRenderedTab: PersonalAgentModeTab,
+): PersonalAgentModeTab = if (activeTab != PersonalAgentModeTab.CHAT) {
+    activeTab
+} else {
+    previousRenderedTab
+}
 
 /**
  * Large floating Tasks / Center overlay panel anchored above the live chat root,
  * aligned with iOS `ChatViewComposer` inline Duet panels:
  * - Leaves the chat top chrome and timeline visible beneath a dismissible scrim
  * - Supports downward drag-to-dismiss on the handle/header, scrim tap, close button, and system Back
- * - Keeps the bottom `对话 / 任务 / 中心` switcher docked continuously at the bottom
+ * - Keeps the bottom `对话 / 任务 / 中心` switcher stationary at `y = 0` so open/dismiss never ghosts
  */
 @Composable
 internal fun PersonalAgentModeSheetOverlay(
@@ -106,17 +125,19 @@ internal fun PersonalAgentModeSheetOverlay(
     onOpenTaskSettings: () -> Unit,
     bottomBar: @Composable () -> Unit,
     modifier: Modifier = Modifier,
+    panelBodyContent: (@Composable (PersonalAgentModeTab) -> Unit)? = null,
 ) {
     val visible = activeTab != PersonalAgentModeTab.CHAT
     val tokens = LocalAmberTokens.current
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val dismissThresholdPx = with(density) { 84.dp.toPx() }
-    val dragOffsetY = remember { Animatable(0f) }
-
-    LaunchedEffect(activeTab) {
-        dragOffsetY.snapTo(0f)
+    var renderedTab by remember { mutableStateOf(PersonalAgentModeTab.TASKS) }
+    val resolvedRenderedTab = resolveModeSheetRenderedTab(activeTab, renderedTab)
+    if (resolvedRenderedTab != renderedTab) {
+        renderedTab = resolvedRenderedTab
     }
+    var dockedBottomBarHeightPx by remember { mutableIntStateOf(0) }
 
     BackHandler(enabled = visible) {
         onSelectTab(PersonalAgentModeTab.CHAT)
@@ -126,8 +147,8 @@ internal fun PersonalAgentModeSheetOverlay(
         // Scrim over the underlying conversation; tapping exposed chat area dismisses back to Chat.
         AnimatedVisibility(
             visible = visible,
-            enter = fadeIn(tween(durationMillis = 180)),
-            exit = fadeOut(tween(durationMillis = 150)),
+            enter = fadeIn(tween(durationMillis = ModeSheetEnterFadeDurationMs)),
+            exit = fadeOut(tween(durationMillis = ModeSheetExitFadeDurationMs)),
         ) {
             Box(
                 modifier = Modifier
@@ -145,15 +166,24 @@ internal fun PersonalAgentModeSheetOverlay(
         AnimatedVisibility(
             visible = visible,
             enter = slideInVertically(
-                animationSpec = tween(durationMillis = 260, easing = ModeSheetEasing),
-                initialOffsetY = { it / 2 },
-            ) + fadeIn(tween(durationMillis = 180)),
+                animationSpec = tween(durationMillis = ModeSheetEnterSlideDurationMs, easing = ModeSheetEnterEasing),
+                initialOffsetY = { (it * ModeSheetSlideFraction).roundToInt() },
+            ) + fadeIn(tween(durationMillis = ModeSheetEnterFadeDurationMs)),
             exit = slideOutVertically(
-                animationSpec = tween(durationMillis = 200, easing = ModeSheetEasing),
-                targetOffsetY = { it / 2 },
-            ) + fadeOut(tween(durationMillis = 140)),
+                animationSpec = tween(durationMillis = ModeSheetExitSlideDurationMs, easing = ModeSheetExitEasing),
+                targetOffsetY = { (it * ModeSheetSlideFraction).roundToInt() },
+            ) + fadeOut(tween(durationMillis = ModeSheetExitFadeDurationMs)),
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
+            // Scoped inside AnimatedVisibility so dragOffsetY is preserved across the entire
+            // exit animation (no upward snap-back on release) and starts cleanly at 0f on reopen.
+            val dragOffsetY = remember { Animatable(0f) }
+            LaunchedEffect(visible) {
+                if (visible && dragOffsetY.value > 0f) {
+                    dragOffsetY.animateTo(0f, tween(durationMillis = 200, easing = ModeSheetEnterEasing))
+                }
+            }
+
             BoxWithConstraints(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.BottomCenter,
@@ -166,7 +196,6 @@ internal fun PersonalAgentModeSheetOverlay(
                     maxHeight * 0.80f,
                 )
                 val sheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
-                val shadowColor = if (tokens.isDark) Color.Black.copy(alpha = 0.36f) else tokens.ink.copy(alpha = 0.16f)
 
                 val dragState = rememberDraggableState { delta ->
                     scope.launch {
@@ -188,8 +217,11 @@ internal fun PersonalAgentModeSheetOverlay(
                     tonalElevation = 0.dp,
                     shadowElevation = 0.dp,
                 ) {
-                    // Only initialize proactive center VM when the Center tab is actually viewed.
-                    val proactiveVm: CloudProactiveCenterVM? = if (activeTab == PersonalAgentModeTab.CENTER) {
+                    // Only initialize proactive center VM when the Center tab is actually viewed;
+                    // latched via renderedTab so dismissing Center never blanks out mid-exit.
+                    val proactiveVm: CloudProactiveCenterVM? = if (
+                        panelBodyContent == null && renderedTab == PersonalAgentModeTab.CENTER
+                    ) {
                         koinViewModel()
                     } else {
                         null
@@ -210,7 +242,10 @@ internal fun PersonalAgentModeSheetOverlay(
                                             onSelectTab(PersonalAgentModeTab.CHAT)
                                         } else {
                                             scope.launch {
-                                                dragOffsetY.animateTo(0f, tween(durationMillis = 180, easing = ModeSheetEasing))
+                                                dragOffsetY.animateTo(
+                                                    0f,
+                                                    tween(durationMillis = 180, easing = ModeSheetEnterEasing),
+                                                )
                                             }
                                         }
                                     },
@@ -227,8 +262,9 @@ internal fun PersonalAgentModeSheetOverlay(
                             )
                             Spacer(Modifier.height(10.dp))
                             ModeSheetHeaderRow(
-                                activeTab = activeTab,
-                                showCenterRefresh = activeTab == PersonalAgentModeTab.CENTER && proactiveUiState?.isPaired == true,
+                                activeTab = renderedTab,
+                                showCenterRefresh = renderedTab == PersonalAgentModeTab.CENTER &&
+                                    proactiveUiState?.isPaired == true,
                                 centerRefreshEnabled = proactiveUiState?.let { !it.loading && !it.refreshing } ?: false,
                                 onRefreshCenter = { proactiveSession?.refresh() },
                                 onOpenTaskSettings = {
@@ -241,60 +277,91 @@ internal fun PersonalAgentModeSheetOverlay(
 
                         HorizontalDivider(thickness = 0.5.dp, color = tokens.line)
 
-                        // Panel content switched smoothly without nesting a second Scaffold or route
+                        // Panel content switched smoothly without nesting a second Scaffold or route;
+                        // targetState tracks latched renderedTab so dismissing never flashes blank.
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f),
                         ) {
                             AnimatedContent(
-                                targetState = activeTab,
+                                targetState = renderedTab,
                                 transitionSpec = {
                                     fadeIn(tween(durationMillis = 150)) togetherWith fadeOut(tween(durationMillis = 120))
                                 },
                                 label = "personalAgentModeSheetBody",
                             ) { tab ->
-                                when (tab) {
-                                    PersonalAgentModeTab.TASKS -> {
-                                        PersonalAgentTasksPanelBody(
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .testTag("personal-agent-tasks-panel"),
-                                        )
-                                    }
-                                    PersonalAgentModeTab.CENTER -> {
-                                        val session = proactiveSession
-                                        if (session != null) {
-                                            key(session) {
-                                                CloudProactiveCenterBody(
-                                                    vm = session,
-                                                    contentPadding = PaddingValues(bottom = 12.dp),
-                                                    modifier = Modifier
-                                                        .fillMaxSize()
-                                                        .testTag("personal-agent-center-panel"),
-                                                )
+                                if (panelBodyContent != null) {
+                                    panelBodyContent(tab)
+                                } else {
+                                    when (tab) {
+                                        PersonalAgentModeTab.TASKS -> {
+                                            PersonalAgentTasksPanelBody(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .testTag("personal-agent-tasks-panel"),
+                                            )
+                                        }
+                                        PersonalAgentModeTab.CENTER -> {
+                                            val session = proactiveSession
+                                            if (session != null) {
+                                                key(session) {
+                                                    CloudProactiveCenterBody(
+                                                        vm = session,
+                                                        contentPadding = PaddingValues(bottom = 12.dp),
+                                                        modifier = Modifier
+                                                            .fillMaxSize()
+                                                            .testTag("personal-agent-center-panel"),
+                                                    )
+                                                }
                                             }
                                         }
+                                        PersonalAgentModeTab.CHAT -> Unit
                                     }
-                                    PersonalAgentModeTab.CHAT -> Unit
                                 }
                             }
                         }
 
-                        HorizontalDivider(thickness = 0.5.dp, color = tokens.line)
-
-                        // Docked bottom mode switcher aligned with the idle chat bottom bar
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(tokens.bg)
-                                .navigationBarsPadding()
-                                .padding(horizontal = 16.dp)
-                                .padding(bottom = 8.dp),
-                        ) {
-                            bottomBar()
+                        // Reserve exact clearance behind the stationary bottom dock so scrollable
+                        // panel items stay above the bar while the sheet surface extends cleanly down.
+                        if (dockedBottomBarHeightPx > 0) {
+                            Spacer(Modifier.height(with(density) { dockedBottomBarHeightPx.toDp() }))
+                        } else {
+                            Spacer(
+                                Modifier
+                                    .navigationBarsPadding()
+                                    .height(50.dp),
+                            )
                         }
                     }
+                }
+            }
+        }
+
+        // Stationary bottom dock anchored at y = 0 (outside the sliding panel) so the
+        // bottom switcher stays rock-solid with zero vertical shift or ghosting on dismiss.
+        AnimatedVisibility(
+            visible = visible,
+            enter = fadeIn(tween(durationMillis = 120)),
+            exit = fadeOut(tween(durationMillis = 160)),
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onSizeChanged { dockedBottomBarHeightPx = it.height }
+                    .background(tokens.bg)
+                    .testTag("personal-agent-mode-sheet-bottom-dock"),
+            ) {
+                HorizontalDivider(thickness = 0.5.dp, color = tokens.line)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 16.dp)
+                        .padding(bottom = 8.dp),
+                ) {
+                    bottomBar()
                 }
             }
         }
