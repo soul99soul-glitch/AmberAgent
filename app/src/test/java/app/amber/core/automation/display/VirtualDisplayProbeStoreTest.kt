@@ -146,6 +146,21 @@ class VirtualDisplayProbeStoreTest {
         }
     }
 
+    @Test
+    fun missingAccessibilityIsNotAnIsolationVerdictIncludingOlderRecords() {
+        val kv = InMemoryProbeKvStore()
+        val store = VirtualDisplayProbeStore(kv, { "fp" }, { 1L }, { true })
+        val unavailable = passingResult().copy(passed = false, detail = "open_virtual_display_failed:accessibility_service_unavailable")
+        store.record(passingResult())
+        kv.write(mapOf("passed" to false, "detail" to unavailable.detail))
+        assertEquals(VirtualDisplayCompatibility.UNVERIFIED, store.compatibility())
+        assertEquals(unavailable.detail, store.lastResult()?.detail)
+
+        store.record(unavailable)
+        assertNull(store.lastResult())
+        assertEquals(VirtualDisplayCompatibility.UNVERIFIED, store.compatibility())
+    }
+
     private fun passingResult() = IsolationProbeResult(
         passed = true,
         mainScreenInjectedEvents = 0,

@@ -37,7 +37,7 @@
     <string name="setting_phone_use_vd_status_verified_desc">当前系统指纹与应用版本已通过双屏隔离自测。</string>
     <string name="setting_phone_use_vd_status_unverified">未验证</string>
     <string name="setting_phone_use_vd_status_unverified_desc">开启前需先在本机通过双屏隔离自测；系统更新或应用升级后会自动重置为未验证。</string>
-    <string name="setting_phone_use_vd_status_failed">不支持（自测未通过）</string>
+    <string name="setting_phone_use_vd_status_failed">隔离自测未通过</string>
     <string name="setting_phone_use_vd_status_failed_desc">最近一次隔离自测未通过：%1$s</string>
     <string name="setting_phone_use_vd_status_unsupported">不支持</string>
     <string name="setting_phone_use_vd_status_unsupported_desc">本机不满足运行条件：%1$s</string>
@@ -94,4 +94,13 @@
 
     <string name="setting_phone_use_vd_active_run_section">活跃虚拟屏任务</string>
     <string name="setting_phone_use_vd_active_run_open">查看实时预览（%1$s）</string>
+    <string name="vd_access_on">已开启</string>
+    <string name="vd_access_off">未开启</string>
+    <string name="vd_access_purpose">Amber 需要无障碍服务来读取虚拟屏上的窗口。</string>
+    <string name="vd_access_settings">去开启无障碍</string>
+    <string name="vd_probe_need_access">请先在系统设置中开启 AmberAgent 无障碍服务，再开始自测。</string>
+    <string name="vd_probe_access_unavailable">上次自测开始时，AmberAgent 无障碍服务尚未就绪。</string>
+    <string name="vd_probe_locked">屏幕熄灭或已锁定，请解锁后重试。</string>
+    <string name="vd_probe_need_pair">请先完成本机无线调试配对。</string>
+    <string name="vd_probe_target_missing">自测时未检测到目标窗口在虚拟屏上打开。</string>
 </resources>

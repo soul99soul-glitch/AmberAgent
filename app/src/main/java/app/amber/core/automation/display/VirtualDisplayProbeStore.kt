@@ -23,6 +23,9 @@ data class IsolationProbeResult(
     val targetBackObserved: Boolean = false,
     val transportName: String = "shizuku",
 ) {
+    internal val missingAccessibilityAtStart: Boolean
+        get() = detail == "open_virtual_display_failed:accessibility_service_unavailable"
+
     fun meetsAllStrictCriteria(requiredTaps: Int = REQUIRED_PROBE_TAPS): Boolean =
         passed && evidenceFailures(requiredTaps).isEmpty()
 
@@ -119,6 +122,7 @@ class VirtualDisplayProbeStore internal constructor(
             return VirtualDisplayCompatibility.UNVERIFIED
         }
         val result = readStoredResultLocked() ?: return VirtualDisplayCompatibility.UNVERIFIED
+        if (result.missingAccessibilityAtStart) return VirtualDisplayCompatibility.UNVERIFIED
         if (transportName != null && result.transportName != transportName) return VirtualDisplayCompatibility.UNVERIFIED
         return if (result.meetsAllStrictCriteria()) {
             VirtualDisplayCompatibility.VERIFIED
@@ -129,6 +133,10 @@ class VirtualDisplayProbeStore internal constructor(
 
     @Synchronized
     fun record(result: IsolationProbeResult) {
+        if (result.missingAccessibilityAtStart) {
+            kv.clear()
+            return
+        }
         val effectivePassed = result.meetsAllStrictCriteria()
         kv.write(
             mapOf(

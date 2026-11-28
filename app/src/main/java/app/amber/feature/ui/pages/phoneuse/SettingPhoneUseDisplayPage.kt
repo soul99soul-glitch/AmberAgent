@@ -43,6 +43,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.amber.agent.BuildConfig
 import app.amber.agent.R
 import app.amber.agent.Screen
+import app.amber.core.automation.AmberAccessibilityService
 import app.amber.core.automation.display.AmberDisplayUserService
 import app.amber.core.automation.display.EmbeddedAdbDisplayBridge
 import app.amber.core.automation.display.IsolationProbeMainActivity
@@ -90,6 +91,12 @@ fun SettingPhoneUseDisplayPage() {
 
     val compatibility = remember(refreshTick) { probeStore.compatibility() }
     val lastProbeResult = remember(refreshTick) { probeStore.lastResult() }
+    val activeService by AmberAccessibilityService.connectedService.collectAsStateWithLifecycle()
+    val accessibilityReady = activeService != null
+    val lastDetail = lastProbeResult?.let {
+        val message = probeDetailMessage(it.detail, it.passed)
+        if (message != null) stringResource(message) else it.detail
+    }
     val shizukuRunning = remember(refreshTick) { shizukuBridge.isShizukuRunning() }
     val shizukuAuthorized = remember(refreshTick) { shizukuBridge.hasShizukuPermission() }
     var virtualDisplayEnabled by rememberSharedPreferenceBoolean(
@@ -179,7 +186,7 @@ fun SettingPhoneUseDisplayPage() {
                             stringResource(R.string.setting_phone_use_vd_status_failed),
                             stringResource(
                                 R.string.setting_phone_use_vd_status_failed_desc,
-                                lastProbeResult?.detail?.ifBlank { "criteria_not_met" } ?: "criteria_not_met",
+                                lastDetail ?: stringResource(R.string.setting_phone_use_vd_status_failed),
                             ),
                             true,
                         )
@@ -221,6 +228,19 @@ fun SettingPhoneUseDisplayPage() {
                         requestShizuku = { shizukuBridge.requestShizukuPermission(SHIZUKU_PERMISSION_REQUEST_CODE) },
                     )
                 }
+                item("accessibility") {
+                    SettingCardGroup(title = stringResource(R.string.permission_display_accessibility_service_title)) {
+                        item(
+                            headlineContent = { Text(stringResource(if (accessibilityReady) R.string.vd_access_on else R.string.vd_access_off)) },
+                            supportingContent = { Text(stringResource(R.string.vd_access_purpose)) },
+                            trailingContent = {
+                                if (!accessibilityReady) TextButton(onClick = {
+                                    context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                                }) { Text(stringResource(R.string.vd_access_settings)) }
+                            },
+                        )
+                    }
+                }
             }
 
             item("isolation_probe") {
@@ -231,17 +251,15 @@ fun SettingPhoneUseDisplayPage() {
                         supportingContent = {
                             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text(
-                                    text = stringResource(R.string.setting_phone_use_vd_probe_desc),
+                                    text = stringResource(if (!accessibilityReady && unsupportedReason.isEmpty()) R.string.vd_probe_need_access else R.string.setting_phone_use_vd_probe_desc),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = workspaceColors().muted,
                                 )
-                                if (lastProbeResult != null) {
+                                if (lastDetail != null) {
                                     Text(
                                         text = stringResource(
                                             R.string.setting_phone_use_vd_probe_last_result,
-                                            lastProbeResult.detail.ifBlank {
-                                                if (lastProbeResult.passed) "passed" else "failed"
-                                            },
+                                            lastDetail,
                                         ),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = workspaceColors().muted,
@@ -252,7 +270,7 @@ fun SettingPhoneUseDisplayPage() {
                         trailingContent = {
                             TextButton(
                                 modifier = Modifier.heightIn(min = 48.dp),
-                                enabled = compatibility != VirtualDisplayCompatibility.UNSUPPORTED,
+                                enabled = accessibilityReady && compatibility != VirtualDisplayCompatibility.UNSUPPORTED,
                                 onClick = {
                                     runCatching {
                                         context.startActivity(
@@ -299,6 +317,21 @@ fun SettingPhoneUseDisplayPage() {
                 }
             }
         }
+    }
+}
+
+internal fun probeDetailMessage(detail: String, passed: Boolean): Int? {
+    if (detail.startsWith("target_did_not_resume_on_virtual_display(")) return R.string.vd_probe_target_missing
+    val reason = detail.removePrefix("open_virtual_display_failed:")
+        .removePrefix("display_bridge_unavailable:")
+        .removePrefix("wireless_adb: ")
+        .substringBefore(", shizuku: ")
+    return when (reason) {
+        "accessibility_service_unavailable" -> R.string.vd_probe_access_unavailable
+        "device_locked_or_screen_off" -> R.string.vd_probe_locked
+        "adb_not_paired" -> R.string.vd_probe_need_pair
+        "ok", "", "criteria_not_met" -> if (passed) R.string.setting_phone_use_vd_status_verified else R.string.setting_phone_use_vd_status_failed
+        else -> null
     }
 }
 

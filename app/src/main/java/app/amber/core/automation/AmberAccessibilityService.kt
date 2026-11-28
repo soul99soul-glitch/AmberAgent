@@ -9,6 +9,8 @@ import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityWindowInfo
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -42,14 +44,12 @@ class AmberAccessibilityService : AccessibilityService(), AccessibilityControlle
     override fun onInterrupt() = Unit
 
     override fun onServiceConnected() {
-        activeService = this
+        activeService.value = this
         AccessibilityActive.activeController = this
     }
 
     override fun onDestroy() {
-        if (activeService === this) {
-            activeService = null
-        }
+        activeService.compareAndSet(this, null)
         if (AccessibilityActive.activeController === this) {
             AccessibilityActive.activeController = null
         }
@@ -225,10 +225,10 @@ class AmberAccessibilityService : AccessibilityService(), AccessibilityControlle
             if (!dispatched && continuation.isActive) continuation.resume(false)
         }
     companion object {
-        @Volatile
-        private var activeService: AmberAccessibilityService? = null
+        private val activeService = MutableStateFlow<AmberAccessibilityService?>(null)
+        internal val connectedService = activeService.asStateFlow()
 
-        fun getActiveService(): AmberAccessibilityService? = activeService
+        fun getActiveService(): AmberAccessibilityService? = activeService.value
 
         private val _screenEvents = MutableSharedFlow<ScreenEvent>(
             extraBufferCapacity = 64,

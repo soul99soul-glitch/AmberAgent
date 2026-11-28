@@ -94,4 +94,13 @@
 
     <string name="setting_phone_use_vd_active_run_section">Active Virtual Run</string>
     <string name="setting_phone_use_vd_active_run_open">Open live preview (%1$s)</string>
+    <string name="vd_access_on">Enabled</string>
+    <string name="vd_access_off">Not enabled</string>
+    <string name="vd_access_purpose">Amber uses this service to read the windows on the virtual display.</string>
+    <string name="vd_access_settings">Open accessibility settings</string>
+    <string name="vd_probe_need_access">Enable AmberAgent Accessibility before starting the self-test.</string>
+    <string name="vd_probe_access_unavailable">The accessibility service was unavailable at the start of the test.</string>
+    <string name="vd_probe_locked">The screen was off or locked. Unlock it and retry.</string>
+    <string name="vd_probe_need_pair">Pair local wireless debugging first.</string>
+    <string name="vd_probe_target_missing">The test did not see the target window open on the virtual display.</string>
 </resources>
