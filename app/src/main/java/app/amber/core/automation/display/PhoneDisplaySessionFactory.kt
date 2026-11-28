@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Factory opening either a [PhysicalDisplaySession] (unchanged physical path) or a
- * generation-bound [VirtualDisplaySession] gated by API 34+, Shizuku UID 2000, required flags,
+ * generation-bound [VirtualDisplaySession] gated by API 34+, a shell UID 2000 transport, required flags,
  * and device-local [VirtualDisplayProbeStore] verification.
  *
  * When [PhoneDisplayMode.VIRTUAL] is requested and any gate fails, always returns
@@ -47,7 +47,7 @@ class PhoneDisplaySessionFactory internal constructor(
     constructor(
         context: Context,
         probeStore: VirtualDisplayProbeStore,
-        displayBridge: DisplayBridge = ShizukuDisplayBridge(context),
+        displayBridge: DisplayBridge,
     ) : this(
         probeStore = probeStore,
         displayBridge = displayBridge,
@@ -174,14 +174,18 @@ class PhoneDisplaySessionFactory internal constructor(
         }
         val connected = displayBridge.connect(::invalidate).getOrElse { error ->
             return DisplaySessionOutcome.Unavailable(
-                "shizuku_unavailable:${error.message ?: error.javaClass.simpleName}",
+                "display_bridge_unavailable:${error.message ?: error.javaClass.simpleName}",
             )
         }
 
+        if (requireProbeVerified && probeStore.compatibility(connected.transportName) != VirtualDisplayCompatibility.VERIFIED) {
+            connected.disconnect()
+            return DisplaySessionOutcome.Unavailable("isolation_probe_unverified_for_${connected.transportName}")
+        }
         val remoteUid = connected.uid()
         if (remoteUid != AmberDisplayUserService.SHELL_UID) {
             connected.disconnect()
-            return DisplaySessionOutcome.Unavailable("invalid_shizuku_uid:$remoteUid")
+            return DisplaySessionOutcome.Unavailable("invalid_display_service_uid:$remoteUid")
         }
 
         val caps = connected.capabilities()
@@ -191,7 +195,7 @@ class PhoneDisplaySessionFactory internal constructor(
         }
         if (caps.uid != AmberDisplayUserService.SHELL_UID) {
             connected.disconnect()
-            return DisplaySessionOutcome.Unavailable("invalid_shizuku_uid:${caps.uid}")
+            return DisplaySessionOutcome.Unavailable("invalid_display_service_uid:${caps.uid}")
         }
         if (!caps.ownFocus) {
             connected.disconnect()

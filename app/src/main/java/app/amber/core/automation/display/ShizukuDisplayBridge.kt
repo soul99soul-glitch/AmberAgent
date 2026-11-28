@@ -31,6 +31,9 @@ interface DisplayBridge {
 }
 
 interface ConnectedDisplayBridge {
+    val transportName: String get() = "shizuku"
+    fun probeTransportAlive(): Boolean? = null
+    fun interruptTransportForProbe(): Boolean = false
     fun uid(): Int
     fun capabilities(): DisplayCapabilities
     fun createDisplay(
@@ -183,51 +186,11 @@ class ShizukuDisplayBridge(
         private val binderDeadListener: Shizuku.OnBinderDeadListener,
         private val deathRecipient: IBinder.DeathRecipient,
         private val onManualDisconnect: () -> Unit,
-    ) : ConnectedDisplayBridge {
+    ) : BinderDisplayConnection(service) {
 
         private val disconnected = AtomicBoolean(false)
 
-        override fun uid(): Int = runCatching { service.uid() }.getOrDefault(-1)
-
-        override fun capabilities(): DisplayCapabilities {
-            val bundle: Bundle = runCatching { service.capabilities() }.getOrNull() ?: Bundle.EMPTY
-            return DisplayCapabilities(
-                apiLevel = bundle.getInt(AmberDisplayUserService.CAP_API_LEVEL, 0),
-                uid = bundle.getInt(AmberDisplayUserService.CAP_UID, -1),
-                ownFocus = bundle.getBoolean(AmberDisplayUserService.CAP_OWN_FOCUS, false),
-                destroyContentOnRemoval = bundle.getBoolean(AmberDisplayUserService.CAP_DESTROY_CONTENT_ON_REMOVAL, false),
-                trusted = bundle.getBoolean(AmberDisplayUserService.CAP_TRUSTED, false),
-                secondaryActivities = bundle.getBoolean(AmberDisplayUserService.CAP_SECONDARY_ACTIVITIES, false),
-            )
-        }
-
-        override fun createDisplay(
-            runId: String,
-            authorizedPackageName: String,
-            generation: Long,
-            width: Int,
-            height: Int,
-            dpi: Int,
-            surface: Surface,
-        ): Int = runCatching {
-            service.createDisplay(runId, authorizedPackageName, generation, width, height, dpi, surface)
-        }.getOrElse {
-            Log.w(TAG, "createDisplay IPC failed", it)
-            AmberDisplayUserService.ERR_CREATE_FAILED
-        }
-
-        override fun launchOnDisplay(generation: Long, displayId: Int, packageName: String): Int =
-            service.launchOnDisplay(generation, displayId, packageName)
-
-        override fun injectMotion(generation: Long, displayId: Int, observedPackageName: String, event: MotionEvent): Boolean =
-            service.injectMotion(generation, displayId, observedPackageName, event)
-
-        override fun injectKey(generation: Long, displayId: Int, observedPackageName: String, event: KeyEvent): Boolean =
-            service.injectKey(generation, displayId, observedPackageName, event)
-
-        override fun release(generation: Long, reason: String) {
-            runCatching { service.release(generation, reason) }
-        }
+        override fun probeTransportAlive(): Boolean? = runCatching { Shizuku.pingBinder() }.getOrNull()
 
         override fun disconnect() {
             if (!disconnected.compareAndSet(false, true)) return
@@ -242,5 +205,51 @@ class ShizukuDisplayBridge(
         private const val TAG = "ShizukuDisplayBridge"
         private const val PROCESS_SUFFIX = "amber_display"
         private const val DEFAULT_BIND_TIMEOUT_MS = 8_000L
+    }
+}
+
+internal abstract class BinderDisplayConnection(
+    private val service: IAmberDisplayService,
+) : ConnectedDisplayBridge {
+    override fun uid(): Int = runCatching { service.uid() }.getOrDefault(-1)
+
+    override fun capabilities(): DisplayCapabilities {
+        val bundle: Bundle = runCatching { service.capabilities() }.getOrNull() ?: Bundle.EMPTY
+        return DisplayCapabilities(
+            apiLevel = bundle.getInt(AmberDisplayUserService.CAP_API_LEVEL, 0),
+            uid = bundle.getInt(AmberDisplayUserService.CAP_UID, -1),
+            ownFocus = bundle.getBoolean(AmberDisplayUserService.CAP_OWN_FOCUS, false),
+            destroyContentOnRemoval = bundle.getBoolean(AmberDisplayUserService.CAP_DESTROY_CONTENT_ON_REMOVAL, false),
+            trusted = bundle.getBoolean(AmberDisplayUserService.CAP_TRUSTED, false),
+            secondaryActivities = bundle.getBoolean(AmberDisplayUserService.CAP_SECONDARY_ACTIVITIES, false),
+        )
+    }
+
+    override fun createDisplay(
+        runId: String,
+        authorizedPackageName: String,
+        generation: Long,
+        width: Int,
+        height: Int,
+        dpi: Int,
+        surface: Surface,
+    ): Int = runCatching {
+        service.createDisplay(runId, authorizedPackageName, generation, width, height, dpi, surface)
+    }.getOrElse {
+        Log.w("DisplayBridge", "createDisplay IPC failed", it)
+        AmberDisplayUserService.ERR_CREATE_FAILED
+    }
+
+    override fun launchOnDisplay(generation: Long, displayId: Int, packageName: String): Int =
+        service.launchOnDisplay(generation, displayId, packageName)
+
+    override fun injectMotion(generation: Long, displayId: Int, observedPackageName: String, event: MotionEvent): Boolean =
+        service.injectMotion(generation, displayId, observedPackageName, event)
+
+    override fun injectKey(generation: Long, displayId: Int, observedPackageName: String, event: KeyEvent): Boolean =
+        service.injectKey(generation, displayId, observedPackageName, event)
+
+    override fun release(generation: Long, reason: String) {
+        runCatching { service.release(generation, reason) }
     }
 }

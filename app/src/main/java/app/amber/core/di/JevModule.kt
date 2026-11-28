@@ -1,5 +1,8 @@
 package app.amber.core.di
 
+import app.amber.core.automation.display.CompositeDisplayBridge
+import app.amber.core.automation.display.DisplayBridge
+import app.amber.core.automation.display.EmbeddedAdbDisplayBridge
 import app.amber.core.automation.display.IsolationProbeRunner
 import app.amber.core.automation.display.PhoneDisplaySessionFactory
 import app.amber.core.automation.display.ShizukuDisplayBridge
@@ -90,12 +93,14 @@ val jevModule = module {
     single { JevWebGoalRunner(get()) }
     single { VirtualDisplayProbeStore(androidContext()) }
     single { ShizukuDisplayBridge(androidContext()) }
+    single { EmbeddedAdbDisplayBridge(androidContext()) }
+    single<DisplayBridge> { CompositeDisplayBridge(get<EmbeddedAdbDisplayBridge>(), get<ShizukuDisplayBridge>()) }
     single { VirtualDisplayRunNotifier(androidContext()) }
     single {
         PhoneDisplaySessionFactory(
             context = androidContext(),
             probeStore = get(),
-            displayBridge = get<ShizukuDisplayBridge>(),
+            displayBridge = get<DisplayBridge>(),
         )
     }
     single {

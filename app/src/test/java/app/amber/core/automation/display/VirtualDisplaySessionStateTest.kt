@@ -269,7 +269,7 @@ class VirtualDisplaySessionStateTest {
             probeVerified = true,
         ).open("run", "com.example.target", PhoneDisplayMode.VIRTUAL)
         assertTrue(rootRejected is DisplaySessionOutcome.Unavailable)
-        assertTrue((rootRejected as DisplaySessionOutcome.Unavailable).reason.contains("invalid_shizuku_uid"))
+        assertTrue((rootRejected as DisplaySessionOutcome.Unavailable).reason.contains("invalid_display_service_uid"))
         assertTrue(rootBridge.disconnected)
 
         // 5. Probe store UNVERIFIED

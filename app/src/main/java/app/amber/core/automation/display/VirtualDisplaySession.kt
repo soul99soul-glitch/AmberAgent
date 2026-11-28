@@ -83,6 +83,13 @@ class VirtualDisplaySession internal constructor(
             windowsProvider = windowsProvider,
         )
 
+    internal val transportName: String get() = bridge.transportName
+
+    internal fun probeTransportAlive(): Boolean? = bridge.probeTransportAlive()
+
+    internal fun interruptTransportForProbe(): Boolean =
+        packageName.endsWith(AmberDisplayUserService.PROBE_TARGET_SUFFIX) && bridge.interruptTransportForProbe()
+
     override suspend fun launchTarget(): Boolean {
         if (!isGenerationValid || displayId <= Display.DEFAULT_DISPLAY || packageName.isBlank()) {
             return false
@@ -138,7 +145,7 @@ class VirtualDisplaySession internal constructor(
     }
 
     /**
-     * Called when Shizuku disconnects, the virtual display is removed, or its dimensions/rotation change.
+     * Called when the display transport disconnects, the virtual display is removed, or its dimensions/rotation change.
      * Immediately invalidates `generation`; never replays or hot-downgrades to physical.
      */
     fun invalidate(reason: String, targetState: VirtualDisplaySessionState? = null) {

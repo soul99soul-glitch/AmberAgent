@@ -29,7 +29,7 @@
     <string name="phone_use_vd_live_takeover_stay">暂不打开</string>
 
     <string name="setting_jev_phone_use_vd_entry_title">虚拟屏 Phone Use（实验）</string>
-    <string name="setting_jev_phone_use_vd_entry_desc">通过 Shizuku 在隔离虚拟屏中运行手机操控，不抢占主屏</string>
+    <string name="setting_jev_phone_use_vd_entry_desc">通过本机无线调试在隔离虚拟屏上操控应用</string>
 
     <string name="setting_phone_use_vd_title">虚拟屏 Phone Use</string>
     <string name="setting_phone_use_vd_status_section">本机状态</string>
@@ -45,13 +45,35 @@
     <string name="setting_phone_use_vd_reason_api_below_34">需要 Android 14（API 34）及以上版本（当前 API %1$d）。</string>
     <string name="setting_phone_use_vd_reason_no_secondary_activities">系统未声明支持副屏 Activity 特性。</string>
 
-    <string name="setting_phone_use_vd_shizuku_section">Shizuku 授权引导</string>
-    <string name="setting_phone_use_vd_shizuku_title">Shizuku 服务（仅限 UID 2000）</string>
+    <string name="vd_adb_section">本机无线调试（免 Shizuku）</string>
+    <string name="vd_adb_ready">辅助进程已就绪（UID 2000）</string>
+    <string name="vd_adb_ready_desc">虚拟屏可通过本机辅助进程连接。</string>
+    <string name="vd_adb_paired">已配对，辅助进程未连接</string>
+    <string name="vd_adb_paired_desc">请打开系统无线调试，再连接辅助进程。</string>
+    <string name="vd_adb_unpaired">尚未配对</string>
+    <string name="vd_adb_pair_instructions">在开发者选项中打开「无线调试」，选择「使用配对码配对设备」。保持弹窗打开，下拉通知栏，在 AmberAgent 通知中输入配对码。</string>
+    <string name="vd_adb_go_pair">去无线调试配对</string>
+    <string name="vd_adb_manual_pair">手动输入配对端口与配对码</string>
+    <string name="vd_adb_manual_pair_hint">填写系统配对弹窗内的端口和六位配对码。可用分屏让弹窗保持打开。</string>
+    <string name="vd_adb_code">六位配对码</string>
+    <string name="vd_adb_six_digits">请输入完整的六位配对码。</string>
+    <string name="vd_adb_pair_port">配对端口</string>
+    <string name="vd_adb_connect_port">连接端口</string>
+    <string name="vd_adb_connect_hint">填写「无线调试」主页「IP 地址和端口」中的端口。</string>
+    <string name="vd_adb_connect">连接辅助进程</string>
+    <string name="vd_adb_manual_connect">手动输入连接端口</string>
+    <string name="vd_adb_disconnect">断开辅助进程</string>
+    <string name="vd_adb_pairing">正在与本机配对…</string>
+    <string name="vd_adb_working">正在连接本机…</string>
+    <string name="vd_adb_pair_success">已配对。请回到 AmberAgent 连接辅助进程。</string>
+    <string name="vd_adb_pair_error">配对失败。请重新打开系统配对弹窗，使用新的配对码和端口重试。</string>
+    <string name="vd_adb_connect_error">连接失败。请检查无线调试及当前连接端口。若已在系统中取消配对，请重新配对。</string>
+    <string name="vd_adb_permission_hint">暂时无法自动发现，请手动输入无线调试中显示的端口。</string>
+    <string name="vd_adb_shizuku">已检测到 Shizuku 兼容通道</string>
+
     <string name="setting_phone_use_vd_shizuku_ready">运行中且已授权</string>
     <string name="setting_phone_use_vd_shizuku_need_permission">运行中，等待授权</string>
-    <string name="setting_phone_use_vd_shizuku_not_running">未运行。请通过无线调试启动 Shizuku（仅使用 ADB shell UID 2000，不使用 root）。</string>
     <string name="setting_phone_use_vd_shizuku_request_btn">去授权</string>
-    <string name="setting_phone_use_vd_shizuku_refresh_btn">刷新</string>
 
     <string name="setting_phone_use_vd_probe_section">双屏隔离自测</string>
     <string name="setting_phone_use_vd_probe_title">启动隔离自测</string>

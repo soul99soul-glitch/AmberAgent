@@ -36,6 +36,10 @@ class VirtualDisplayProbeStoreTest {
         store.record(pass)
         assertEquals(VirtualDisplayCompatibility.VERIFIED, store.compatibility())
         assertEquals(pass, store.lastResult())
+        assertEquals(VirtualDisplayCompatibility.UNVERIFIED, store.compatibility("embedded_adb"))
+        store.record(pass.copy(transportName = "embedded_adb"))
+        assertEquals(VirtualDisplayCompatibility.VERIFIED, store.compatibility("embedded_adb"))
+        assertEquals(VirtualDisplayCompatibility.UNVERIFIED, store.compatibility("shizuku"))
 
         // OS OTA (Build.FINGERPRINT changes) -> immediately reverts to UNVERIFIED.
         fingerprint = "vendor/device/android15:15/AP3A.241005.015/200:user/release-keys"

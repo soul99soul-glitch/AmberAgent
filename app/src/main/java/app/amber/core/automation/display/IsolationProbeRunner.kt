@@ -13,7 +13,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import rikka.shizuku.Shizuku
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -177,11 +176,11 @@ internal object IsolationProbeChannel {
  * Orchestrates the device-local dual-display isolation self-test (R3 L12).
  *
  * Procedure:
- * 1. Create a virtual display (720x1600 / 320dpi) via Shizuku UID 2000 with all mandatory flags.
+ * 1. Create a virtual display (720x1600 / 320dpi) via the active UID 2000 helper with all mandatory flags.
  * 2. Launch [IsolationProbeTargetActivity] onto that virtual display.
  * 3. Verify rendered frame marker color via [VirtualDisplayFrameSource].
  * 4. Inject 20 taps, Chinese `ACTION_SET_TEXT`, and BACK into the virtual display while Display 0 holds focus.
- * 5. Disconnect Shizuku / tear down virtual display, verify zero post-disconnect residual events and
+ * 5. Disconnect the transport / tear down virtual display, verify zero post-disconnect residual events and
  *    zero Activity leakage onto Display 0.
  * 6. Persist the [IsolationProbeResult] into [VirtualDisplayProbeStore].
  */
@@ -313,15 +312,18 @@ class IsolationProbeRunner(
                 IsolationProbeChannel.isMainFocusStable() && hostActivity.hasMainInputFocus() &&
                 IsolationProbeChannel.targetTapCount() == IsolationProbeResult.REQUIRED_PROBE_TAPS &&
                 IsolationProbeChannel.mainScreenInjectedEvents() == 0 && session.isGenerationValid &&
-                runCatching { Shizuku.pingBinder() }.getOrNull() == true
+                session.probeTransportAlive() == true
 
-            // The operator stops Shizuku externally. A local session.close() suppresses binder
-            // callbacks and cannot establish how a real disconnect affects either display.
+            // Interrupt the transport itself. Closing the session locally would suppress the death callback.
             IsolationProbeChannel.enterDisconnectPhase()
             val disconnected = if (readyForDisconnect) {
-                onProgress("5/6 请在 45 秒内从外部停止 Shizuku，保持本页打开。")
+                if (withContext(Dispatchers.IO) { session.interruptTransportForProbe() }) {
+                    onProgress("5/6 已断开无线调试通道，等待辅助进程退出。请保持本页打开。")
+                } else {
+                    onProgress("5/6 请在 45 秒内从外部停止 Shizuku，保持本页打开。")
+                }
                 waitUntil(DISCONNECT_TIMEOUT_MS, 100L) {
-                    !session.isGenerationValid && runCatching { Shizuku.pingBinder() }.getOrNull() == false
+                    !session.isGenerationValid && session.probeTransportAlive() == false
                 }
             } else {
                 false
@@ -342,6 +344,7 @@ class IsolationProbeRunner(
                 -1 // No disconnect observation window.
             }
             val observed = IsolationProbeResult(
+                transportName = session.transportName,
                 passed = false,
                 mainScreenInjectedEvents = mainInjected,
                 targetReceivedEvents = targetReceived,

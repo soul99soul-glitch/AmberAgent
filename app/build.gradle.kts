@@ -922,6 +922,7 @@ kotlin {
 }
 
 dependencies {
+    implementation(libs.bouncycastle.bcprov)
     baselineProfile(project(":app:baselineprofile"))
     implementation(libs.androidx.core.ktx)
     implementation("androidx.documentfile:documentfile:1.1.0")

@@ -29,7 +29,7 @@
     <string name="phone_use_vd_live_takeover_stay">Not now</string>
 
     <string name="setting_jev_phone_use_vd_entry_title">Virtual Display Phone Use (Experimental)</string>
-    <string name="setting_jev_phone_use_vd_entry_desc">Run phone automation on an isolated virtual display via Shizuku</string>
+    <string name="setting_jev_phone_use_vd_entry_desc">Control apps on an isolated virtual display using local wireless debugging</string>
 
     <string name="setting_phone_use_vd_title">Virtual Display Phone Use</string>
     <string name="setting_phone_use_vd_status_section">This Device Status</string>
@@ -45,13 +45,35 @@
     <string name="setting_phone_use_vd_reason_api_below_34">Requires Android 14 (API 34) or higher (current API %1$d).</string>
     <string name="setting_phone_use_vd_reason_no_secondary_activities">Device does not advertise secondary display activity support.</string>
 
-    <string name="setting_phone_use_vd_shizuku_section">Shizuku Authorization</string>
-    <string name="setting_phone_use_vd_shizuku_title">Shizuku Service (UID 2000)</string>
+    <string name="vd_adb_section">Wireless debugging on this device</string>
+    <string name="vd_adb_ready">Helper connected (UID 2000)</string>
+    <string name="vd_adb_ready_desc">The virtual display can use the local helper.</string>
+    <string name="vd_adb_paired">Paired · Helper disconnected</string>
+    <string name="vd_adb_paired_desc">Turn on Wireless debugging and connect the helper.</string>
+    <string name="vd_adb_unpaired">Not paired</string>
+    <string name="vd_adb_pair_instructions">Open Wireless debugging in Developer options and select Pair device with pairing code. Keep the dialog open and enter the code in the AmberAgent notification.</string>
+    <string name="vd_adb_go_pair">Pair in Wireless debugging</string>
+    <string name="vd_adb_manual_pair">Enter pairing port and code</string>
+    <string name="vd_adb_manual_pair_hint">Use the port and six-digit code shown in the system pairing dialog. Keep the dialog visible in split screen.</string>
+    <string name="vd_adb_code">Six-digit pairing code</string>
+    <string name="vd_adb_six_digits">Enter all six digits of the pairing code.</string>
+    <string name="vd_adb_pair_port">Pairing port</string>
+    <string name="vd_adb_connect_port">Connection port</string>
+    <string name="vd_adb_connect_hint">Use the port under IP address and port on the main Wireless debugging screen.</string>
+    <string name="vd_adb_connect">Connect helper</string>
+    <string name="vd_adb_manual_connect">Enter connection port</string>
+    <string name="vd_adb_disconnect">Disconnect helper</string>
+    <string name="vd_adb_pairing">Pairing with this device…</string>
+    <string name="vd_adb_working">Connecting to this device…</string>
+    <string name="vd_adb_pair_success">Pairing complete. Return to AmberAgent to connect the helper.</string>
+    <string name="vd_adb_pair_error">Pairing failed. Open a new pairing dialog and try its code and port.</string>
+    <string name="vd_adb_connect_error">Could not connect. Check Wireless debugging and its current connection port. If pairing was removed in Settings, pair again.</string>
+    <string name="vd_adb_permission_hint">Automatic setup is unavailable. Enter the port shown in Wireless debugging.</string>
+    <string name="vd_adb_shizuku">Shizuku compatibility connection detected</string>
+
     <string name="setting_phone_use_vd_shizuku_ready">Running and authorized</string>
     <string name="setting_phone_use_vd_shizuku_need_permission">Running, authorization required</string>
-    <string name="setting_phone_use_vd_shizuku_not_running">Not running. Start Shizuku via Wireless Debugging (ADB shell UID 2000; root is not used).</string>
     <string name="setting_phone_use_vd_shizuku_request_btn">Authorize</string>
-    <string name="setting_phone_use_vd_shizuku_refresh_btn">Refresh</string>
 
     <string name="setting_phone_use_vd_probe_section">Isolation Self-Test</string>
     <string name="setting_phone_use_vd_probe_title">Dual-Display Isolation Probe</string>

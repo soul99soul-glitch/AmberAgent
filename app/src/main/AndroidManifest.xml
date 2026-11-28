@@ -387,6 +387,15 @@
         android:value="androidx.startup"
         tools:node="remove" />
     </provider>
+    <service
+      android:name="app.amber.core.automation.display.adb.WirelessAdbPairingNotification"
+      android:exported="false"
+      android:foregroundServiceType="shortService" />
+    <provider
+      android:name="app.amber.core.automation.display.DisplayHelperBinderProvider"
+      android:authorities="${applicationId}.displayhelper"
+      android:exported="true"
+      android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
     <provider
       android:name="rikka.shizuku.ShizukuProvider"
       android:authorities="${applicationId}.shizuku"

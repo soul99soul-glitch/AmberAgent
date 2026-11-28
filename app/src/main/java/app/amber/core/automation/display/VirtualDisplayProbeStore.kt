@@ -21,6 +21,7 @@ data class IsolationProbeResult(
     val targetDestroyed: Boolean = false,
     val mainInputObserved: Boolean = false,
     val targetBackObserved: Boolean = false,
+    val transportName: String = "shizuku",
 ) {
     fun meetsAllStrictCriteria(requiredTaps: Int = REQUIRED_PROBE_TAPS): Boolean =
         passed && evidenceFailures(requiredTaps).isEmpty()
@@ -105,7 +106,7 @@ class VirtualDisplayProbeStore internal constructor(
     )
 
     @Synchronized
-    fun compatibility(): VirtualDisplayCompatibility {
+    fun compatibility(transportName: String? = null): VirtualDisplayCompatibility {
         if (!environmentSupportedProvider()) {
             return VirtualDisplayCompatibility.UNSUPPORTED
         }
@@ -118,6 +119,7 @@ class VirtualDisplayProbeStore internal constructor(
             return VirtualDisplayCompatibility.UNVERIFIED
         }
         val result = readStoredResultLocked() ?: return VirtualDisplayCompatibility.UNVERIFIED
+        if (transportName != null && result.transportName != transportName) return VirtualDisplayCompatibility.UNVERIFIED
         return if (result.meetsAllStrictCriteria()) {
             VirtualDisplayCompatibility.VERIFIED
         } else {
@@ -130,6 +132,7 @@ class VirtualDisplayProbeStore internal constructor(
         val effectivePassed = result.meetsAllStrictCriteria()
         kv.write(
             mapOf(
+                KEY_TRANSPORT to result.transportName,
                 KEY_FINGERPRINT to fingerprintProvider(),
                 KEY_VERSION_CODE to versionCodeProvider(),
                 KEY_PASSED to effectivePassed,
@@ -169,6 +172,7 @@ class VirtualDisplayProbeStore internal constructor(
         // Historical probes lack evidence for disconnect or display-scoped BACK.
         if (!kv.contains(KEY_PASSED) || !kv.contains(KEY_DISCONNECT_OBSERVED) || !kv.contains(KEY_TARGET_BACK_OBSERVED)) return null
         return IsolationProbeResult(
+            transportName = kv.getString(KEY_TRANSPORT) ?: "shizuku",
             passed = kv.getBoolean(KEY_PASSED, false),
             mainScreenInjectedEvents = kv.getInt(KEY_MAIN_INJECTED, -1),
             targetReceivedEvents = kv.getInt(KEY_TARGET_RECEIVED, 0),
@@ -186,6 +190,7 @@ class VirtualDisplayProbeStore internal constructor(
     }
 
     companion object {
+        private const val KEY_TRANSPORT = "display_transport"
         private const val PREFS_NAME = "virtual_display_probe"
         private const val KEY_FINGERPRINT = "build_fingerprint"
         private const val KEY_VERSION_CODE = "app_version_code"
