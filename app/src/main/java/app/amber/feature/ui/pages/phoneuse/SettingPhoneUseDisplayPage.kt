@@ -223,10 +223,21 @@ fun SettingPhoneUseDisplayPage() {
                     WirelessAdbSettingsCard(
                         refreshTick = refreshTick,
                         onRefresh = { refreshTick++ },
-                        shizukuRunning = shizukuRunning,
-                        shizukuAuthorized = shizukuAuthorized,
-                        requestShizuku = { shizukuBridge.requestShizukuPermission(SHIZUKU_PERMISSION_REQUEST_CODE) },
                     )
+                }
+                if (shizukuRunning && !shizukuAuthorized) {
+                    item("shizuku_permission") {
+                        SettingCardGroup(title = stringResource(R.string.vd_adb_shizuku)) {
+                            item(
+                                headlineContent = { Text(stringResource(R.string.setting_phone_use_vd_shizuku_need_permission)) },
+                                trailingContent = {
+                                    TextButton(onClick = { shizukuBridge.requestShizukuPermission(SHIZUKU_PERMISSION_REQUEST_CODE) }) {
+                                        Text(stringResource(R.string.setting_phone_use_vd_shizuku_request_btn))
+                                    }
+                                },
+                            )
+                        }
+                    }
                 }
                 item("accessibility") {
                     SettingCardGroup(title = stringResource(R.string.permission_display_accessibility_service_title)) {
@@ -343,9 +354,6 @@ private enum class AdbDialog { PAIR, CONNECT }
 private fun WirelessAdbSettingsCard(
     refreshTick: Int,
     onRefresh: () -> Unit,
-    shizukuRunning: Boolean,
-    shizukuAuthorized: Boolean,
-    requestShizuku: () -> Unit,
 ) {
     val context = LocalContext.current
     val bridge = koinInject<EmbeddedAdbDisplayBridge>()
@@ -358,6 +366,7 @@ private fun WirelessAdbSettingsCard(
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
     var feedback by remember { mutableIntStateOf(0) }
+    val notificationFeedback by WirelessAdbPairingNotification.feedback.collectAsStateWithLifecycle()
     var dialog by remember { mutableStateOf<AdbDialog?>(null) }
     // Only the operation is restorable across a permission dialog, never the pairing code.
     var requestingPair by rememberSaveable { mutableStateOf(true) }
@@ -366,6 +375,7 @@ private fun WirelessAdbSettingsCard(
         if (busy) return
         busy = true
         feedback = 0
+        WirelessAdbPairingNotification.clearFeedback()
         scope.launch {
             var pairedNow = false
             try {
@@ -382,6 +392,7 @@ private fun WirelessAdbSettingsCard(
                 feedback = when {
                     pairedNow -> R.string.vd_adb_pair_success
                     pairingCode != null -> R.string.vd_adb_pair_error
+                    port != null -> R.string.vd_adb_retry_pair_hint
                     else -> R.string.vd_adb_connect_error
                 }
             } finally {
@@ -404,27 +415,25 @@ private fun WirelessAdbSettingsCard(
                 }
             } else {
                 feedback = R.string.vd_adb_permission_hint
-                dialog = AdbDialog.PAIR
             }
         } catch (_: Exception) {
             context.stopService(Intent(context, WirelessAdbPairingNotification::class.java))
             feedback = R.string.vd_adb_permission_hint
-            dialog = AdbDialog.PAIR
         }
     }
 
     val permissions = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
-        if (grants.values.all { it }) {
+        if (grants.isNotEmpty() && grants.values.all { it }) {
             if (requestingPair) openPairingSettings() else connect(null)
         } else {
             feedback = R.string.vd_adb_permission_hint
-            dialog = if (requestingPair) AdbDialog.PAIR else AdbDialog.CONNECT
         }
     }
 
     fun startDiscovery(pair: Boolean) {
         requestingPair = pair
         feedback = 0
+        WirelessAdbPairingNotification.clearFeedback()
         val missing = buildList {
             if (pair) add(Manifest.permission.POST_NOTIFICATIONS)
             if (Build.VERSION.SDK_INT >= 37) add(Manifest.permission.ACCESS_LOCAL_NETWORK)
@@ -439,51 +448,45 @@ private fun WirelessAdbSettingsCard(
             paired -> R.string.vd_adb_paired
             else -> R.string.vd_adb_unpaired
         }
+        val issue = if (ready) 0 else feedback.takeIf { it != 0 } ?: notificationFeedback
+        val action = when {
+            ready -> R.string.vd_adb_disconnect
+            paired -> R.string.vd_adb_connect
+            else -> R.string.vd_adb_go_pair
+        }
         item(
+            modifier = Modifier.settingTwoLine(),
             headlineContent = { Text(stringResource(status)) },
             supportingContent = {
                 Text(stringResource(when {
-                    feedback != 0 -> feedback
+                    issue != 0 -> issue
                     busy -> R.string.vd_adb_working
                     ready -> R.string.vd_adb_ready_desc
                     paired -> R.string.vd_adb_paired_desc
                     else -> R.string.vd_adb_pair_instructions
                 }))
             },
+            trailingContent = {
+                TextButton(enabled = !busy, onClick = {
+                    if (ready) {
+                        scope.launch {
+                            withContext(Dispatchers.IO) { bridge.stop() }
+                            feedback = 0
+                            WirelessAdbPairingNotification.clearFeedback()
+                        }
+                    } else startDiscovery(pair = !paired)
+                }) { Text(stringResource(action)) }
+            },
         )
-        if (ready) {
+        val recovery = adbRecoveryAction(issue, paired, requestingPair)
+        if (recovery != null && !busy) {
             item(onClick = {
-                scope.launch {
-                    withContext(Dispatchers.IO) { bridge.stop() }
-                    feedback = 0
+                when (recovery) {
+                    R.string.vd_adb_retry_pair -> startDiscovery(pair = true)
+                    R.string.vd_adb_manual_pair -> dialog = AdbDialog.PAIR
+                    else -> dialog = AdbDialog.CONNECT
                 }
-            }) { Text(stringResource(R.string.vd_adb_disconnect)) }
-        } else {
-            if (paired) {
-                item(onClick = if (busy) null else ({ startDiscovery(false) })) {
-                    Text(stringResource(R.string.vd_adb_connect))
-                }
-                item(onClick = if (busy) null else ({ dialog = AdbDialog.CONNECT })) {
-                    Text(stringResource(R.string.vd_adb_manual_connect))
-                }
-            }
-            item(onClick = if (busy) null else ({ startDiscovery(true) })) {
-                Text(stringResource(R.string.vd_adb_go_pair))
-            }
-            item(onClick = if (busy) null else ({ dialog = AdbDialog.PAIR })) {
-                Text(stringResource(R.string.vd_adb_manual_pair))
-            }
-        }
-        if (shizukuRunning) {
-            item(
-                headlineContent = { Text(stringResource(R.string.vd_adb_shizuku)) },
-                supportingContent = { Text(stringResource(if (shizukuAuthorized) R.string.setting_phone_use_vd_shizuku_ready else R.string.setting_phone_use_vd_shizuku_need_permission)) },
-                trailingContent = {
-                    if (!shizukuAuthorized) TextButton(onClick = requestShizuku) {
-                        Text(stringResource(R.string.setting_phone_use_vd_shizuku_request_btn))
-                    }
-                },
-            )
+            }) { Text(stringResource(recovery)) }
         }
     }
 
@@ -493,6 +496,14 @@ private fun WirelessAdbSettingsCard(
             connect(port, if (mode == AdbDialog.PAIR) code else null)
         }
     }
+}
+
+internal fun adbRecoveryAction(issue: Int, paired: Boolean, requestingPair: Boolean): Int? = when {
+    issue == 0 -> null
+    issue == R.string.vd_adb_retry_pair_hint -> R.string.vd_adb_retry_pair
+    !paired || issue == R.string.vd_adb_pair_error ||
+        (issue == R.string.vd_adb_permission_hint && requestingPair) -> R.string.vd_adb_manual_pair
+    else -> R.string.vd_adb_manual_connect
 }
 
 private val portDigits = Regex("[0-9]{1,5}")

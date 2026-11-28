@@ -45,7 +45,7 @@
     <string name="setting_phone_use_vd_reason_api_below_34">Requires Android 14 (API 34) or higher (current API %1$d).</string>
     <string name="setting_phone_use_vd_reason_no_secondary_activities">Device does not advertise secondary display activity support.</string>
 
-    <string name="vd_adb_section">Wireless debugging on this device</string>
+    <string name="vd_adb_section">Local wireless debugging</string>
     <string name="vd_adb_ready">Helper connected (UID 2000)</string>
     <string name="vd_adb_ready_desc">The virtual display can use the local helper.</string>
     <string name="vd_adb_paired">Paired · Helper disconnected</string>
@@ -57,7 +57,7 @@
     <string name="vd_adb_cancel">Stop waiting</string>
     <string name="vd_adb_success_connected">Pairing complete. The helper is connected. Tap to return to AmberAgent.</string>
     <string name="vd_adb_success_disconnected">Pairing complete. Tap to return to AmberAgent and connect the helper.</string>
-    <string name="vd_adb_go_pair">Pair in Wireless debugging</string>
+    <string name="vd_adb_go_pair">Pair</string>
     <string name="vd_adb_manual_pair">Pair manually</string>
     <string name="vd_adb_manual_pair_hint">Keep the system pairing dialog open. Enter its six-digit code in split screen or a floating window. Amber finds the local pairing port and connects the helper after pairing.</string>
     <string name="vd_adb_code">Six-digit pairing code</string>
@@ -66,14 +66,14 @@
     <string name="vd_adb_connect_port">Port or IP:port</string>
     <string name="vd_adb_address_example">e.g. 38421 or 192.168.100.124:38421</string>
     <string name="vd_adb_connect_hint">Use the port under IP address and port on the main Wireless debugging screen.</string>
-    <string name="vd_adb_connect">Connect helper</string>
+    <string name="vd_adb_connect">Connect</string>
     <string name="vd_adb_manual_connect">Enter connection port</string>
-    <string name="vd_adb_disconnect">Disconnect helper</string>
+    <string name="vd_adb_disconnect">Disconnect</string>
     <string name="vd_adb_pairing">Pairing with this device…</string>
     <string name="vd_adb_working">Connecting to this device…</string>
-    <string name="vd_adb_pair_success">Paired. Tap Connect helper to retry the connection.</string>
+    <string name="vd_adb_pair_success">Paired. Tap Connect to try again.</string>
     <string name="vd_adb_pair_error">Pairing failed. Open a new pairing dialog and try its code and port.</string>
-    <string name="vd_adb_connect_error">Could not connect. Check Wireless debugging and its current connection port. If pairing was removed in Settings, pair again.</string>
+    <string name="vd_adb_connect_error">Could not connect automatically. Check Wireless debugging or enter its connection port.</string>
     <string name="vd_adb_permission_hint">Automatic setup is unavailable. Enter the port shown in Wireless debugging.</string>
     <string name="vd_adb_shizuku">Shizuku compatibility connection detected</string>
 
@@ -105,4 +105,6 @@
     <string name="vd_probe_target_missing">The test did not see the target window open on the virtual display.</string>
     <string name="vd_probe_window_focus_lost">The main window lost focus during the isolation test.</string>
     <string name="vd_probe_input_focus_lost">The main input field did not retain focus during the test.</string>
+    <string name="vd_adb_retry_pair">Pair again</string>
+    <string name="vd_adb_retry_pair_hint">Check the connection port. If pairing was removed in Settings, pair again.</string>
 </resources>

@@ -45,7 +45,7 @@
     <string name="setting_phone_use_vd_reason_api_below_34">需要 Android 14（API 34）及以上版本（当前 API %1$d）。</string>
     <string name="setting_phone_use_vd_reason_no_secondary_activities">系统未声明支持副屏 Activity 特性。</string>
 
-    <string name="vd_adb_section">本机无线调试（免 Shizuku）</string>
+    <string name="vd_adb_section">本机无线调试</string>
     <string name="vd_adb_ready">辅助进程已就绪（UID 2000）</string>
     <string name="vd_adb_ready_desc">虚拟屏可通过本机辅助进程连接。</string>
     <string name="vd_adb_paired">已配对，辅助进程未连接</string>
@@ -56,8 +56,8 @@
     <string name="vd_adb_found">已发现配对服务（端口 %1$d）。保持系统弹窗打开，点下方「六位配对码」输入。</string>
     <string name="vd_adb_cancel">停止等待</string>
     <string name="vd_adb_success_connected">配对成功，辅助进程已连接。点此返回 Amber。</string>
-    <string name="vd_adb_success_disconnected">配对成功。点此返回 Amber，再点「连接辅助进程」。</string>
-    <string name="vd_adb_go_pair">去无线调试配对</string>
+    <string name="vd_adb_success_disconnected">配对成功。点此返回 Amber，再点「连接」。</string>
+    <string name="vd_adb_go_pair">去配对</string>
     <string name="vd_adb_manual_pair">手动配对</string>
     <string name="vd_adb_manual_pair_hint">保持系统配对弹窗打开，在小窗或分屏中输入六位码即可。Amber 会自动发现本机配对端口，配对后自动连接。</string>
     <string name="vd_adb_code">六位配对码</string>
@@ -66,14 +66,14 @@
     <string name="vd_adb_connect_port">端口或 IP:端口</string>
     <string name="vd_adb_address_example">如 38421 或 192.168.100.124:38421</string>
     <string name="vd_adb_connect_hint">填写「无线调试」主页「IP 地址和端口」中的端口。</string>
-    <string name="vd_adb_connect">连接辅助进程</string>
+    <string name="vd_adb_connect">连接</string>
     <string name="vd_adb_manual_connect">手动输入连接端口</string>
-    <string name="vd_adb_disconnect">断开辅助进程</string>
+    <string name="vd_adb_disconnect">断开</string>
     <string name="vd_adb_pairing">正在与本机配对…</string>
     <string name="vd_adb_working">正在连接本机…</string>
-    <string name="vd_adb_pair_success">已配对，辅助进程尚未连接。请点「连接辅助进程」重试。</string>
+    <string name="vd_adb_pair_success">已配对，请点「连接」重试。</string>
     <string name="vd_adb_pair_error">配对失败。请重新打开系统配对弹窗，使用新的配对码和端口重试。</string>
-    <string name="vd_adb_connect_error">连接失败。请检查无线调试及当前连接端口。若已在系统中取消配对，请重新配对。</string>
+    <string name="vd_adb_connect_error">自动连接失败。请确认无线调试已开启，或手动输入连接端口。</string>
     <string name="vd_adb_permission_hint">暂时无法自动发现，请手动输入无线调试中显示的端口。</string>
     <string name="vd_adb_shizuku">已检测到 Shizuku 兼容通道</string>
 
@@ -105,4 +105,6 @@
     <string name="vd_probe_target_missing">自测时未检测到目标窗口在虚拟屏上打开。</string>
     <string name="vd_probe_window_focus_lost">隔离自测期间，主屏窗口失去了焦点。</string>
     <string name="vd_probe_input_focus_lost">自测期间，主屏输入框未能保持焦点。</string>
+    <string name="vd_adb_retry_pair">重新配对</string>
+    <string name="vd_adb_retry_pair_hint">请检查连接端口。如果已在系统中取消配对，可以重新配对。</string>
 </resources>

@@ -145,6 +145,11 @@ class WirelessAdbPairingNotification : Service() {
         if (alert) announcedPort = port
         val notification = buildNotification(stage, port, alert)
         lastNotification = stage
+        pairingFeedback.value = when (stage) {
+            PairingStage.FAILED, PairingStage.DISCOVERY_UNAVAILABLE -> stage.message
+            PairingStage.DISCONNECTED -> R.string.vd_adb_pair_success
+            else -> 0
+        }
         try {
             if (first) {
                 startForeground(ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SHORT_SERVICE)
@@ -156,6 +161,7 @@ class WirelessAdbPairingNotification : Service() {
             }
         } catch (_: SecurityException) {
             cancelPrompt()
+            pairingFeedback.value = R.string.vd_adb_permission_hint
         }
     }
 
@@ -206,7 +212,10 @@ class WirelessAdbPairingNotification : Service() {
         stopSelf()
     }
 
-    override fun onTimeout(startId: Int) = cancelPrompt()
+    override fun onTimeout(startId: Int) {
+        cancelPrompt()
+        pairingFeedback.value = R.string.vd_adb_permission_hint
+    }
 
     override fun onDestroy() {
         scope.cancel()
@@ -214,6 +223,10 @@ class WirelessAdbPairingNotification : Service() {
     }
 
     companion object {
+        private val pairingFeedback = MutableStateFlow(0)
+        internal val feedback = pairingFeedback.asStateFlow()
+        internal fun clearFeedback() { pairingFeedback.value = 0 }
+
         private val completedPairs = MutableStateFlow(0)
         internal val pairRevision = completedPairs.asStateFlow()
         private const val CHANNEL = "wireless_adb_pairing"
