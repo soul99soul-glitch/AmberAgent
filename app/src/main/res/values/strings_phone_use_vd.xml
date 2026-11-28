@@ -103,4 +103,6 @@
     <string name="vd_probe_locked">The screen was off or locked. Unlock it and retry.</string>
     <string name="vd_probe_need_pair">Pair local wireless debugging first.</string>
     <string name="vd_probe_target_missing">The test did not see the target window open on the virtual display.</string>
+    <string name="vd_probe_window_focus_lost">The main window lost focus during the isolation test.</string>
+    <string name="vd_probe_input_focus_lost">The main input field did not retain focus during the test.</string>
 </resources>

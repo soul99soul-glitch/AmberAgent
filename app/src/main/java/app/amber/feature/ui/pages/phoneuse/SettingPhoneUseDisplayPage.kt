@@ -321,6 +321,8 @@ fun SettingPhoneUseDisplayPage() {
 }
 
 internal fun probeDetailMessage(detail: String, passed: Boolean): Int? {
+    if (detail.startsWith("window_focus_lost_at_step_")) return R.string.vd_probe_window_focus_lost
+    if (detail.startsWith("edittext_focus_lost_at_step_") || detail.startsWith("initial_no_focus")) return R.string.vd_probe_input_focus_lost
     if (detail.startsWith("target_did_not_resume_on_virtual_display(")) return R.string.vd_probe_target_missing
     val reason = detail.removePrefix("open_virtual_display_failed:")
         .removePrefix("display_bridge_unavailable:")

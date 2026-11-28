@@ -37,7 +37,8 @@ internal object IsolationProbeChannel {
     private val targetText = AtomicReference<String>("")
 
     private val mainScreenInjectedEvents = AtomicInteger(0)
-    private val mainFocusLost = AtomicBoolean(false)
+    private val firstFocusLoss = AtomicReference<String?>(null)
+    private val step = AtomicInteger(1)
     private val monitorMainFocus = AtomicBoolean(false)
     private val mainInputObserved = AtomicBoolean(false)
     private val targetDestroyed = AtomicBoolean(false)
@@ -66,7 +67,8 @@ internal object IsolationProbeChannel {
         targetTapCount.set(0)
         targetText.set("")
         mainScreenInjectedEvents.set(0)
-        mainFocusLost.set(false)
+        firstFocusLoss.set(null)
+        step.set(1)
         monitorMainFocus.set(true)
         mainInputObserved.set(false)
         targetDestroyed.set(false)
@@ -134,9 +136,14 @@ internal object IsolationProbeChannel {
         }
     }
 
-    fun recordMainFocusLost() {
-        if (monitorMainFocus.get()) {
-            mainFocusLost.set(true)
+    fun enterStep(number: Int) = step.set(number)
+
+    fun focusLossReason(): String? = firstFocusLoss.get()
+
+    fun recordMainFocusLost(reason: String) {
+        val detail = "${reason}_at_step_${step.get()}"
+        if (monitorMainFocus.get() && firstFocusLoss.compareAndSet(null, detail)) {
+            Log.w("IsolationProbe", detail)
         }
     }
 
@@ -165,7 +172,7 @@ internal object IsolationProbeChannel {
     fun targetTapCount(): Int = targetTapCount.get()
     fun targetText(): String = targetText.get()
     fun mainScreenInjectedEvents(): Int = mainScreenInjectedEvents.get()
-    fun isMainFocusStable(): Boolean = !mainFocusLost.get()
+    fun isMainFocusStable(): Boolean = firstFocusLoss.get() == null
     fun mainInputObserved(): Boolean = mainInputObserved.get()
     fun targetDestroyed(): Boolean = targetDestroyed.get()
     fun residualAfterDisconnect(): Int = residualAfterDisconnect.get()
@@ -208,7 +215,7 @@ class IsolationProbeRunner(
     ): IsolationProbeResult {
         val (token, expectedRgb) = IsolationProbeChannel.resetForNewRun()
         val runId = "isolation-probe-$token"
-        if (!hostActivity.hasMainInputFocus()) IsolationProbeChannel.recordMainFocusLost()
+        if (!hostActivity.hasMainInputFocus()) IsolationProbeChannel.recordMainFocusLost("initial_no_focus")
         onProgress("1/6 创建虚拟屏 (720x1600 / 320dpi)...")
 
         val targetToken = AmberDisplayUserService.probeTargetToken(context.packageName)
@@ -254,6 +261,7 @@ class IsolationProbeRunner(
         var detail = "ok"
 
         try {
+            IsolationProbeChannel.enterStep(2)
             onProgress("2/6 在虚拟屏 displayId=${session.displayId} 启动探针页...")
             val launchedViaService = session.launchTarget()
             if (!launchedViaService) {
@@ -267,6 +275,7 @@ class IsolationProbeRunner(
                 detail = "target_did_not_resume_on_virtual_display(actual=${IsolationProbeChannel.targetDisplayId()})"
             }
 
+            IsolationProbeChannel.enterStep(3)
             onProgress("3/6 校验虚拟屏帧缓冲随机色标...")
             val frameMarkerOk = if (resumedOnVirtual) {
                 waitUntil(timeoutMs = FRAME_MARKER_TIMEOUT_MS, pollMs = 100L) {
@@ -279,6 +288,7 @@ class IsolationProbeRunner(
                 false
             }
 
+            IsolationProbeChannel.enterStep(4)
             onProgress("4/6 请持续在主屏输入中文，正在验证虚拟屏点击、输入和返回键隔离…")
             IsolationProbeChannel.setInjectionBurstActive(true)
             val tapX = session.width * 0.5f
@@ -315,6 +325,7 @@ class IsolationProbeRunner(
                 session.probeTransportAlive() == true
 
             // Interrupt the transport itself. Closing the session locally would suppress the death callback.
+            IsolationProbeChannel.enterStep(5)
             IsolationProbeChannel.enterDisconnectPhase()
             val disconnected = if (readyForDisconnect) {
                 if (withContext(Dispatchers.IO) { session.interruptTransportForProbe() }) {
@@ -360,11 +371,12 @@ class IsolationProbeRunner(
                 detail = detail,
             )
             val failures = observed.evidenceFailures()
+            IsolationProbeChannel.enterStep(6)
             onProgress("6/6 写入探测结论...")
             return recordAndReturn(
                 observed.copy(
                     passed = resumedOnVirtual && failures.isEmpty(),
-                    detail = if (detail != "ok" || failures.isEmpty()) detail else failures.joinToString(","),
+                    detail = IsolationProbeChannel.focusLossReason() ?: if (detail != "ok" || failures.isEmpty()) detail else failures.joinToString(","),
                 ),
             )
         } finally {

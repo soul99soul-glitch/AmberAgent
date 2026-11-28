@@ -155,14 +155,12 @@ class DisplayInputGuardTest {
             assertEquals(0, usedFlags and DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR)
             assertEquals(0, usedFlags and DisplayManager.VIRTUAL_DISPLAY_FLAG_SECURE)
 
-            // 2. When TRUSTED is rejected, retries with ALL 4 mandatory flags intact.
+            assertTrue((usedFlags and FakeDisplayServiceBackend.FLAG_KEEP_TOP_FOCUS) != 0)
             val rejectTrustedBackend = FakeDisplayServiceBackend(rejectTrustedFlag = true)
             val rejectTrustedService = AmberDisplayUserService(rejectTrustedBackend, onDestroyProcess = {})
-            assertEquals(12, rejectTrustedService.createDisplay("run-no-trusted", "com.example.app", 2L, 720, 1600, 320, surface))
-            val fallbackFlags = rejectTrustedBackend.requestedFlags.last()
-            assertEquals(0, fallbackFlags and FakeDisplayServiceBackend.FLAG_TRUSTED)
-            assertTrue((fallbackFlags and FakeDisplayServiceBackend.FLAG_OWN_FOCUS) != 0)
-            assertTrue((fallbackFlags and FakeDisplayServiceBackend.FLAG_DESTROY_CONTENT_ON_REMOVAL) != 0)
+            assertEquals(AmberDisplayUserService.ERR_FLAG_REJECTED,
+                rejectTrustedService.createDisplay("run-no-trusted", "com.example.app", 2L, 720, 1600, 320, surface))
+            assertEquals(listOf(usedFlags), rejectTrustedBackend.requestedFlags)
 
             // 3. When required flags are rejected, fails with ERR_FLAG_REJECTED — never drops OWN_FOCUS.
             val rejectAllBackend = FakeDisplayServiceBackend(rejectAllFlags = true)
@@ -328,6 +326,7 @@ class DisplayInputGuardTest {
             ownFocusFlag = if (ownFocusAvailable) FLAG_OWN_FOCUS else null,
             destroyContentOnRemovalFlag = if (destroyOnRemovalAvailable) FLAG_DESTROY_CONTENT_ON_REMOVAL else null,
             trustedFlag = FLAG_TRUSTED,
+            stealTopFocusDisabledFlag = FLAG_KEEP_TOP_FOCUS,
         )
 
         override fun createVirtualDisplay(
@@ -367,6 +366,7 @@ class DisplayInputGuardTest {
         }
 
         companion object {
+            const val FLAG_KEEP_TOP_FOCUS = 1 shl 16
             const val FLAG_TRUSTED = 1 shl 10
             const val FLAG_OWN_FOCUS = 1 shl 14
             const val FLAG_DESTROY_CONTENT_ON_REMOVAL = 1 shl 12

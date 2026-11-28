@@ -161,6 +161,23 @@ class VirtualDisplayProbeStoreTest {
         assertEquals(VirtualDisplayCompatibility.UNVERIFIED, store.compatibility())
     }
 
+    @Test
+    fun firstHostFocusLossRemainsLatchedUntilANewRun() {
+        IsolationProbeChannel.resetForNewRun()
+        try {
+            IsolationProbeChannel.enterStep(2)
+            IsolationProbeChannel.recordMainFocusLost("window_focus_lost")
+            IsolationProbeChannel.enterStep(4)
+            IsolationProbeChannel.recordMainFocusLost("edittext_focus_lost")
+            assertEquals("window_focus_lost_at_step_2", IsolationProbeChannel.focusLossReason())
+            assertEquals(false, IsolationProbeChannel.isMainFocusStable())
+            IsolationProbeChannel.resetForNewRun()
+            assertEquals(true, IsolationProbeChannel.isMainFocusStable())
+        } finally {
+            IsolationProbeChannel.endRun()
+        }
+    }
+
     private fun passingResult() = IsolationProbeResult(
         passed = true,
         mainScreenInjectedEvents = 0,

@@ -26,7 +26,8 @@ import kotlin.system.exitProcess
  * Security & isolation invariants:
  * - Rejects any process UID != 2000 (root UID 0 and ordinary app UIDs are both denied).
  * - Requires API 34+ and ALL mandatory virtual display flags:
- *   PUBLIC | OWN_CONTENT_ONLY | OWN_FOCUS | DESTROY_CONTENT_ON_REMOVAL.
+ *   PUBLIC | OWN_CONTENT_ONLY | DESTROY_CONTENT_ON_REMOVAL, plus a trusted display with
+ *   independent focus that cannot steal the top focus from Display 0.
  *   Never uses AUTO_MIRROR or SECURE, and never silently downgrades any required flag.
  * - Rejects DEFAULT_DISPLAY (0) for any launch or input injection.
  * - Verifies setDisplayId(displayId) via immediate reflective getDisplayId() readback before
@@ -109,14 +110,16 @@ class AmberDisplayUserService internal constructor(
         val resolvedFlags = backend.resolveVirtualDisplayFlags()
         val ownFocusFlag = resolvedFlags.ownFocusFlag
         val destroyContentFlag = resolvedFlags.destroyContentOnRemovalFlag
-        if (ownFocusFlag == null || destroyContentFlag == null) {
+        val trustedFlag = resolvedFlags.trustedFlag
+        val keepTopFocusFlag = resolvedFlags.stealTopFocusDisabledFlag
+        if (ownFocusFlag == null || destroyContentFlag == null || trustedFlag == null || keepTopFocusFlag == null) {
             return ERR_MISSING_REQUIRED_FLAG
         }
 
         val requiredFlags = DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC or
             DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY or
             ownFocusFlag or
-            destroyContentFlag
+            destroyContentFlag or trustedFlag or keepTopFocusFlag
 
         // Hard guard: AUTO_MIRROR and SECURE must never be set.
         if ((requiredFlags and FORBIDDEN_FLAGS_MASK) != 0) {
@@ -125,20 +128,8 @@ class AmberDisplayUserService internal constructor(
 
         releaseActiveLocked("replaced_by_new_display")
 
-        val trustedFlag = resolvedFlags.trustedFlag?.takeIf { (it and FORBIDDEN_FLAGS_MASK) == 0 }
-        val created = if (trustedFlag != null) {
-            when (val withTrusted = backend.createVirtualDisplay("amber_vd_${generation}", width, height, dpi, surface, requiredFlags or trustedFlag)) {
-                is CreateDisplayBackendResult.Created -> withTrusted
-                is CreateDisplayBackendResult.FlagRejected -> {
-                    Log.i(TAG, "Optional TRUSTED flag rejected: ${withTrusted.detail}")
-                    // TRUSTED is optional; retry strictly with ALL required flags intact (no downgrade of required flags).
-                    backend.createVirtualDisplay("amber_vd_${generation}", width, height, dpi, surface, requiredFlags)
-                }
-                is CreateDisplayBackendResult.Failed -> withTrusted
-            }
-        } else {
-            backend.createVirtualDisplay("amber_vd_${generation}", width, height, dpi, surface, requiredFlags)
-        }
+        // Android strips OWN_FOCUS from an untrusted display.
+        val created = backend.createVirtualDisplay("amber_vd_${generation}", width, height, dpi, surface, requiredFlags)
 
         return when (created) {
             is CreateDisplayBackendResult.Created -> {
@@ -319,6 +310,7 @@ internal data class ResolvedDisplayFlags(
     val ownFocusFlag: Int?,
     val destroyContentOnRemovalFlag: Int?,
     val trustedFlag: Int?,
+    val stealTopFocusDisabledFlag: Int?,
 )
 
 internal sealed interface CreateDisplayBackendResult {
@@ -381,6 +373,7 @@ internal class AndroidDisplayServiceBackend(
         ownFocusFlag = readDisplayManagerIntConstant("VIRTUAL_DISPLAY_FLAG_OWN_FOCUS"),
         destroyContentOnRemovalFlag = readDisplayManagerIntConstant("VIRTUAL_DISPLAY_FLAG_DESTROY_CONTENT_ON_REMOVAL"),
         trustedFlag = readDisplayManagerIntConstant("VIRTUAL_DISPLAY_FLAG_TRUSTED"),
+        stealTopFocusDisabledFlag = readDisplayManagerIntConstant("VIRTUAL_DISPLAY_FLAG_STEAL_TOP_FOCUS_DISABLED"),
     )
 
     override fun createVirtualDisplay(
@@ -396,7 +389,16 @@ internal class AndroidDisplayServiceBackend(
                 ?: return CreateDisplayBackendResult.Failed("display_manager_unavailable")
             val vd: VirtualDisplay = dm.createVirtualDisplay(name, width, height, dpi, surface, flags)
                 ?: return CreateDisplayBackendResult.Failed("create_virtual_display_returned_null")
-            val displayId = vd.display?.displayId ?: Display.INVALID_DISPLAY
+            val display = vd.display
+            val focusFlags = listOf("FLAG_OWN_FOCUS", "FLAG_STEAL_TOP_FOCUS_DISABLED").map { name ->
+                runCatching { Display::class.java.getField(name).getInt(null) }.getOrNull()
+            }
+            if (display == null || focusFlags.any { it == null || (display.flags and it) == 0 }) {
+                Log.w(TAG, "Missing effective focus flags on created display: actual=${display?.flags}, required=$focusFlags")
+                vd.release()
+                return CreateDisplayBackendResult.FlagRejected("effective_focus_flags_missing")
+            }
+            val displayId = display.displayId
             CreateDisplayBackendResult.Created(
                 object : VirtualDisplayHandle {
                     override val displayId: Int = displayId

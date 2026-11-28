@@ -103,4 +103,6 @@
     <string name="vd_probe_locked">屏幕熄灭或已锁定，请解锁后重试。</string>
     <string name="vd_probe_need_pair">请先完成本机无线调试配对。</string>
     <string name="vd_probe_target_missing">自测时未检测到目标窗口在虚拟屏上打开。</string>
+    <string name="vd_probe_window_focus_lost">隔离自测期间，主屏窗口失去了焦点。</string>
+    <string name="vd_probe_input_focus_lost">自测期间，主屏输入框未能保持焦点。</string>
 </resources>

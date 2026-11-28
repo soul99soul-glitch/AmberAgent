@@ -2,6 +2,8 @@ package app.amber.core.automation.display
 
 import android.os.Bundle
 import android.view.Display
+import android.view.InputDevice
+import android.view.inputmethod.InputMethodManager
 import android.view.MotionEvent
 import android.view.ViewGroup
 import android.widget.Button
@@ -13,6 +15,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.addCallback
 import androidx.core.widget.doOnTextChanged
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
 
@@ -69,7 +73,7 @@ class IsolationProbeMainActivity : ComponentActivity() {
             }
             setOnFocusChangeListener { _, hasFocus ->
                 if (!hasFocus) {
-                    IsolationProbeChannel.recordMainFocusLost()
+                    IsolationProbeChannel.recordMainFocusLost("edittext_focus_lost")
                 }
             }
         }
@@ -101,7 +105,10 @@ class IsolationProbeMainActivity : ComponentActivity() {
 
     override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
         if (ev?.actionMasked == MotionEvent.ACTION_DOWN) {
-            IsolationProbeChannel.recordMainScreenInjectedEvent()
+            val device = ev.device
+            val physicalTouch = ev.deviceId > 0 && device != null && !device.isVirtual &&
+                device.supportsSource(InputDevice.SOURCE_TOUCHSCREEN) && ev.isFromSource(InputDevice.SOURCE_TOUCHSCREEN)
+            if (!physicalTouch) IsolationProbeChannel.recordMainScreenInjectedEvent()
         }
         return super.dispatchTouchEvent(ev)
     }
@@ -109,7 +116,7 @@ class IsolationProbeMainActivity : ComponentActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (!hasFocus) {
-            IsolationProbeChannel.recordMainFocusLost()
+            IsolationProbeChannel.recordMainFocusLost("window_focus_lost")
         }
     }
 
@@ -126,6 +133,16 @@ class IsolationProbeMainActivity : ComponentActivity() {
                 IsolationProbeChannel.recordMainScreenInjectedEvent()
             }
             try {
+                val focused = withTimeoutOrNull(1_500) {
+                    while (!hasMainInputFocus()) delay(16)
+                    true
+                } == true
+                if (!focused) {
+                    statusView.text = "主屏输入框尚未获得焦点，请点输入框后重试。"
+                    android.util.Log.w("IsolationProbe", "initial_no_focus window=${hasWindowFocus()} edit=${chineseFocusInput.hasFocus()}")
+                    return@launch
+                }
+                getSystemService(InputMethodManager::class.java)?.showSoftInput(chineseFocusInput, InputMethodManager.SHOW_IMPLICIT)
                 val result = probeRunner.run(
                     hostActivity = this@IsolationProbeMainActivity,
                     onProgress = { msg -> runOnUiThread { statusView.text = msg } },
