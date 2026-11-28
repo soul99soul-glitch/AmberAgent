@@ -36,7 +36,6 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -70,6 +69,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.net.InetAddress
 import org.koin.compose.koinInject
 
 private const val SHIZUKU_PERMISSION_REQUEST_CODE = 49_201
@@ -327,17 +327,28 @@ private fun WirelessAdbSettingsCard(
     // Only the operation is restorable across a permission dialog, never the pairing code.
     var requestingPair by rememberSaveable { mutableStateOf(true) }
 
-    fun connect(port: Int?) {
+    fun connect(port: Int?, pairingCode: String? = null) {
         if (busy) return
         busy = true
         feedback = 0
         scope.launch {
+            var pairedNow = false
             try {
-                bridge.start(port)
+                if (pairingCode != null) {
+                    LocalAdbTlsClient(context.applicationContext).pair(port, pairingCode)
+                    pairedNow = true
+                    onRefresh()
+                }
+                // The connection service advertises a different port from the pairing service.
+                bridge.start(if (pairedNow) null else port)
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
-                feedback = R.string.vd_adb_connect_error
+                feedback = when {
+                    pairedNow -> R.string.vd_adb_pair_success
+                    pairingCode != null -> R.string.vd_adb_pair_error
+                    else -> R.string.vd_adb_connect_error
+                }
             } finally {
                 busy = false
             }
@@ -444,59 +455,76 @@ private fun WirelessAdbSettingsCard(
     dialog?.let { mode ->
         AdbPortDialog(mode, onDismiss = { dialog = null }) { port, code ->
             dialog = null
-            if (mode == AdbDialog.CONNECT) {
-                connect(port)
-            } else {
-                busy = true
-                feedback = 0
-                scope.launch {
-                    try {
-                        LocalAdbTlsClient(context.applicationContext).pair(port, code)
-                        feedback = R.string.vd_adb_pair_success
-                        onRefresh()
-                    } catch (e: CancellationException) {
-                        throw e
-                    } catch (_: Exception) {
-                        feedback = R.string.vd_adb_pair_error
-                    } finally {
-                        busy = false
-                    }
-                }
-            }
+            connect(port, if (mode == AdbDialog.PAIR) code else null)
         }
     }
 }
 
+private val portDigits = Regex("[0-9]{1,5}")
+private val octetDigits = Regex("0|[1-9][0-9]{0,2}")
+
+internal fun parseLocalAdbPortInput(raw: String): Int? {
+    val input = raw.trim().replace('：', ':')
+    val port = input.substringAfter(':').trim()
+    if (!portDigits.matches(port)) return null
+    if (':' in input) {
+        val octets = input.substringBefore(':').trim().split('.')
+        if (octets.size != 4) return null
+        val bytes = ByteArray(4)
+        for ((index, octet) in octets.withIndex()) {
+            if (!octetDigits.matches(octet) || octet.toInt() > 255) return null
+            bytes[index] = octet.toInt().toByte()
+        }
+        val address = InetAddress.getByAddress(bytes)
+        if (!address.isSiteLocalAddress && !address.isLoopbackAddress && !address.isLinkLocalAddress) return null
+    }
+    return port.toInt().takeIf { it in 1..65535 }
+}
+
 @Composable
-private fun AdbPortDialog(mode: AdbDialog, onDismiss: () -> Unit, submit: (Int, String) -> Unit) {
+private fun AdbPortDialog(mode: AdbDialog, onDismiss: () -> Unit, submit: (Int?, String) -> Unit) {
     var port by remember { mutableStateOf("") }
     var code by remember { mutableStateOf("") }
     val pairing = mode == AdbDialog.PAIR
-    val parsedPort = port.toIntOrNull()?.takeIf { it in 1..65535 }
+    val parsedPort = parseLocalAdbPortInput(port)
+    val autoDiscover = pairing && port.isBlank()
+    val context = LocalContext.current
+    var permissionDenied by remember { mutableStateOf(false) }
+    val requestNetwork = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) submit(null, code) else permissionDenied = true
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(if (pairing) R.string.vd_adb_manual_pair else R.string.vd_adb_manual_connect)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(stringResource(if (pairing) R.string.vd_adb_manual_pair_hint else R.string.vd_adb_connect_hint))
-                OutlinedTextField(
-                    value = port, onValueChange = { port = it.filter { c -> c in '0'..'9' }.take(5) },
-                    singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    label = { Text(stringResource(if (pairing) R.string.vd_adb_pair_port else R.string.vd_adb_connect_port)) },
-                )
                 if (pairing) OutlinedTextField(
                     value = code, onValueChange = { code = it.filter { c -> c in '0'..'9' }.take(6) },
-                    singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                    visualTransformation = PasswordVisualTransformation(),
+                    singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     label = { Text(stringResource(R.string.vd_adb_code)) },
                 )
+                OutlinedTextField(
+                    value = port, onValueChange = { port = it },
+                    singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                    label = { Text(stringResource(if (pairing) R.string.vd_adb_pair_port else R.string.vd_adb_connect_port)) },
+                    placeholder = { Text(stringResource(R.string.vd_adb_address_example)) },
+                    isError = port.isNotBlank() && parsedPort == null,
+                )
+                if (permissionDenied && autoDiscover) Text(stringResource(R.string.vd_adb_permission_hint))
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
         confirmButton = {
             TextButton(
-                enabled = parsedPort != null && (!pairing || code.length == 6),
-                onClick = { parsedPort?.let { submit(it, code) } },
+                enabled = (parsedPort != null || autoDiscover) && (!pairing || code.length == 6),
+                onClick = {
+                    if (autoDiscover && Build.VERSION.SDK_INT >= 37 &&
+                        context.checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED
+                    ) {
+                        requestNetwork.launch(Manifest.permission.ACCESS_LOCAL_NETWORK)
+                    } else submit(parsedPort, code)
+                },
             ) { Text(stringResource(R.string.confirm)) }
         },
     )
